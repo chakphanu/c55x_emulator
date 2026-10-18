@@ -5,6 +5,9 @@ model (`c55x_emu/`) on a Rust CPU core (`rust/c55x_core`), with models for the A
 NOR flash, LCD, audio codec, MCU and USB/MTP. It ships no firmware and no vendor code:
 you supply your own updater EXE.
 
+On my hardware (AMD Ryzen AI 7 PRO 360 w/ Radeon 880M) the emulator runs the original firmware in real time (the debug
+tab shows `Speed: 1.00 x real time`). Other machines are not measured.
+
 ## Requirements
 
 - Python 3.10+ and [uv](https://docs.astral.sh/uv/) (PyQt5 only for the GUI), a Rust toolchain (cargo)
