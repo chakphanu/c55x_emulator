@@ -5,3 +5,4 @@ firmware-work/
 *.img
 input/
 output/
+.venv/

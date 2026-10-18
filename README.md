@@ -7,7 +7,7 @@ you supply your own updater EXE.
 
 ## Requirements
 
-- Python 3 (PyQt5 only for the GUI), a Rust toolchain (cargo)
+- Python 3.10+ and [uv](https://docs.astral.sh/uv/) (PyQt5 only for the GUI), a Rust toolchain (cargo)
 - TI C55x code generation tools 4.4.1 (`cl55`, `asm55`, `lnk55`, `dis55`), which are not
   redistributable. Put them in your `PATH` (e.g. `~/.local/bin`), or set `ZEN_TI_BIN` to their `bin`
   directory.
@@ -62,13 +62,15 @@ function names.
 
 ## Graphical front end
 
-Needs PyQt5 (`pip install PyQt5`). Same image argument as the headless entry:
+Needs PyQt5, which `uv` installs from `pyproject.toml` (extra `gui`). Same image argument
+as the headless entry:
 
-    python3 -m c55x_emu.qt_ui build/examples/hello_lcd/hello_lcd.out
-    ZEN_ROOT=$PWD/firmware-work python3 -m c55x_emu.qt_ui jukebox2 --disk zen.img
+    uv run --extra gui python -m c55x_emu.qt_ui build/examples/hello_lcd/hello_lcd.out
+    ZEN_ROOT=$PWD/firmware-work uv run --extra gui python -m c55x_emu.qt_ui jukebox2 --disk zen.img
 
 Options: `--disk FILE`, `--mute` (no live audio), `--scale N` (LCD zoom). Run it from the
-repository root; `jukebox2` needs a prepared firmware (see above).
+repository root; `jukebox2` needs a prepared firmware (see above). The headless parts
+need no Python packages. Without uv: `pip install PyQt5` and call `python3 -m ...`.
 
 ## Environment variables
 
