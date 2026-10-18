@@ -37,11 +37,15 @@ starts `python3 -m c55x_emu` with your options. `--help` lists them all (`--png 
 
 Needs the firmware container tools from
 [zentouch-reverse-engineering](https://github.com/debauer/zentouch-reverse-engineering)
-(clone it next to this repo as `../public`, or set `ZEN_TOOLS`).
+(clone it next to this repo as `../public`, or set `ZEN_TOOLS`). The tools need the three
+public firmware keys from the Rockbox source tree; they are not part of either repo:
+export `ZEN_TL_KEY`, `ZEN_FRESC_KEY` and `ZEN_SIGNING_KEY` first (see `docs/tools.md`,
+section Keys, in that repo).
 
 The updater EXE is available from
 https://github.com/brianpipa/CreativeZen/tree/main/CreativeZenTouch.
 
+    export ZEN_TL_KEY='...' ZEN_FRESC_KEY='...' ZEN_SIGNING_KEY='...'
     scripts/prepare_firmware.sh ZenTouchP4S_PCFW_LF_2_10_05.exe firmware-work
     scripts/run_firmware.sh firmware-work --seconds 5 --png lcd.png
 
@@ -64,6 +68,7 @@ function names.
 | `ZEN_TI_BIN` | TI C55x tools directory |
 | `ZEN_CORE_DIR` | directory with `c55x_core.so` (default `build/py`) |
 | `ZEN_TOOLS` | checkout of zentouch-reverse-engineering (for `prepare_firmware.sh`) |
+| `ZEN_TL_KEY`, `ZEN_FRESC_KEY`, `ZEN_SIGNING_KEY` | firmware keys for `prepare_firmware.sh` (public Rockbox keys) |
 
 ## Layout
 

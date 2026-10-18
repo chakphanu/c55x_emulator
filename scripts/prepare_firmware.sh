@@ -8,6 +8,9 @@
 #   3. make_listing.py         code blocks -> disassembly listing (dis55)
 # Needs the firmware container tools from zentouch-reverse-engineering (ZEN_TOOLS, default
 # ../public) and the TI C55x tools (ZEN_TI_BIN). Tested with ZenTouchP4S_PCFW_LF_2_10_05.exe.
+# The tools need the three public firmware keys in ZEN_TL_KEY, ZEN_FRESC_KEY and
+# ZEN_SIGNING_KEY (Rockbox utils/zenutils/source/zen_crypt/main.cpp, entries "Zen Touch";
+# see docs/tools.md in zentouch-reverse-engineering).
 # Nothing of the firmware is stored outside WORKDIR; do not publish its contents.
 set -eu
 UPDATER=${1:?usage: scripts/prepare_firmware.sh UPDATER.exe [WORKDIR]}
@@ -15,6 +18,9 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 W=$(mkdir -p "${2:-firmware-work}" && cd "${2:-firmware-work}" && pwd)
 TOOLS=${ZEN_TOOLS:-$ROOT/../public}
 TI=${ZEN_TI_BIN:-$HOME/ti-cgt-c5500-4.4.1/bin}
+for v in ZEN_TL_KEY ZEN_FRESC_KEY ZEN_SIGNING_KEY; do
+    eval "[ -n \"\${$v:-}\" ]" || { echo "$v is not set (public Rockbox key, see docs/tools.md of the tools repo)" >&2; exit 1; }
+done
 [ -f "$UPDATER" ] || { echo "no such file: $UPDATER" >&2; exit 1; }
 [ -f "$TOOLS/scripts/roundtrip_zen_touch.py" ] || { echo "firmware tools not found in $TOOLS (set ZEN_TOOLS)" >&2; exit 1; }
 [ -x "$TI/dis55" ] || { echo "dis55 not found in $TI (set ZEN_TI_BIN)" >&2; exit 1; }
