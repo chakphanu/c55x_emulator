@@ -3,11 +3,12 @@
 ROOT is the repository root: ZEN_ROOT if set, else the current directory. Run the emulator
 and its tools from the repository root (`python3 -m c55x_emu ...`). The data (output/,
 analysis/, build/) may be missing; tests then skip and loaders raise FileNotFoundError.
-ZEN_TI_BIN overrides the TI C55x tool directory (default ~/ti-cgt-c5500-4.4.1/bin, else
+ZEN_TI_BIN overrides the TI C55x tool directory (default: where cl55 is found in PATH, else
 ROOT/build/ti-cgt-c5500-4.4.1/bin); ZEN_CORE_DIR the Rust core directory.
 """
 
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -29,9 +30,18 @@ LISTING_DIR = ROOT / "output" / "analysis" / "listing"
 SYMBOLS = ROOT / "analysis" / "symbols.json"
 HYBRID_DIR = ROOT / "build" / "hybrid"
 UPDATE_DIR = (ROOT / "output" / "extracted" / "ZenTouchP4S_PCFW_LF_2_10_05_extracted")
-_HOME_TI = Path.home() / "ti-cgt-c5500-4.4.1" / "bin"
-TI_BIN = Path(os.environ.get("ZEN_TI_BIN")
-              or (_HOME_TI if _HOME_TI.exists() else ROOT / "build" / "ti-cgt-c5500-4.4.1" / "bin"))
+
+
+def _ti_bin():
+    if os.environ.get("ZEN_TI_BIN"):
+        return Path(os.environ["ZEN_TI_BIN"])
+    found = shutil.which("cl55") or shutil.which("dis55")
+    if found:
+        return Path(found).resolve().parent
+    return ROOT / "build" / "ti-cgt-c5500-4.4.1" / "bin"
+
+
+TI_BIN = _ti_bin()
 # the extension built by rust/build.sh (default: build/py next to this package's repo)
 CORE_DIR = Path(os.environ.get("ZEN_CORE_DIR")
                 or Path(__file__).resolve().parents[1] / "build" / "py")

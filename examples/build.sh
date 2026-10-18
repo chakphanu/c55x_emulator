@@ -2,11 +2,11 @@
 # Build an example program: examples/build.sh hello_lcd|hello_audio|hello_mcu
 # -> build/examples/<name>/<name>.out (+ .map, .dis)
 # Needs the TI C55x code generation tools 4.4.1 (cl55, asm55, lnk55, dis55); ZEN_TI_BIN is
-# their bin directory (default: $HOME/ti-cgt-c5500-4.4.1/bin).
+# their bin directory (default: where cl55 is found in PATH).
 set -eu
 NAME=${1:?usage: examples/build.sh <hello_lcd|hello_audio|hello_mcu>}
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-TI=${ZEN_TI_BIN:-$HOME/ti-cgt-c5500-4.4.1/bin}
+TI=${ZEN_TI_BIN:-$(dirname "$(command -v cl55 || echo "$ROOT/build/ti-cgt-c5500-4.4.1/bin/cl55")")}
 EX=$ROOT/examples
 OUT=$ROOT/build/examples/$NAME
 [ -x "$TI/cl55" ] || { echo "cl55 not found in $TI (set ZEN_TI_BIN)" >&2; exit 1; }

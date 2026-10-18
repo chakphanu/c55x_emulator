@@ -17,7 +17,7 @@ UPDATER=${1:?usage: scripts/prepare_firmware.sh UPDATER.exe [WORKDIR]}
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 W=$(mkdir -p "${2:-firmware-work}" && cd "${2:-firmware-work}" && pwd)
 TOOLS=${ZEN_TOOLS:-$ROOT/../public}
-TI=${ZEN_TI_BIN:-$HOME/ti-cgt-c5500-4.4.1/bin}
+TI=${ZEN_TI_BIN:-$(dirname "$(command -v cl55 || echo "$ROOT/build/ti-cgt-c5500-4.4.1/bin/cl55")")}
 for v in ZEN_TL_KEY ZEN_FRESC_KEY ZEN_SIGNING_KEY; do
     eval "[ -n \"\${$v:-}\" ]" || { echo "$v is not set (public Rockbox key, see docs/tools.md of the tools repo)" >&2; exit 1; }
 done

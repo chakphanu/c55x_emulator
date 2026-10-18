@@ -9,8 +9,8 @@ you supply your own updater EXE.
 
 - Python 3 (PyQt5 only for the GUI), a Rust toolchain (cargo)
 - TI C55x code generation tools 4.4.1 (`cl55`, `asm55`, `lnk55`, `dis55`), which are not
-  redistributable. Set `ZEN_TI_BIN` to their `bin` directory (default
-  `~/ti-cgt-c5500-4.4.1/bin`).
+  redistributable. Put them in your `PATH` (e.g. `~/.local/bin`), or set `ZEN_TI_BIN` to their `bin`
+  directory.
 
 ## Build
 
