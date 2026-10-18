@@ -2,14 +2,14 @@
 
 import unittest
 
-from c55x_emu.paths import ROOT
+from c55x_emu.paths import EXAMPLES_DIR
 from c55x_emu.bus import Bus
 from c55x_emu.cpu import EmulationError
 from c55x_emu.expr import number, parse
 from c55x_emu.lcd import Lcd
 from c55x_emu.testutil import machine, run
 
-HELLO = ROOT / "build" / "hello_lcd" / "hello_lcd.out"
+HELLO = EXAMPLES_DIR / "hello_lcd" / "hello_lcd.out"
 
 
 class ParseTests(unittest.TestCase):
@@ -143,7 +143,7 @@ class LcdTests(unittest.TestCase):
         self.assertEqual(lcd.unknown, [])
 
 
-@unittest.skipUnless(HELLO.exists(), "build Hello-LCD first: fw/hello_lcd/build.sh")
+@unittest.skipUnless(HELLO.exists(), "build the example first: examples/build.sh NAME")
 class HelloLcdTests(unittest.TestCase):
     def test_draws_the_test_picture(self):
         from c55x_emu.machine import Machine

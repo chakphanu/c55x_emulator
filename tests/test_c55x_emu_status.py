@@ -2,18 +2,18 @@
 
 import unittest
 
-from c55x_emu.paths import ROOT
+from c55x_emu.paths import EXAMPLES_DIR
 from c55x_emu.machine import Machine
 from c55x_emu.status import describe, duration
 
-HELLO = ROOT / "build" / "hello_mcu" / "hello_mcu.out"
+HELLO = EXAMPLES_DIR / "hello_mcu" / "hello_mcu.out"
 
 
 class StatusTests(unittest.TestCase):
     def test_duration(self):
         self.assertEqual((duration(1.234), duration(75.25)), ("1.23 s", "1 min 15.2 s"))
 
-    @unittest.skipUnless(HELLO.exists(), "fw/build.sh hello_mcu not run")
+    @unittest.skipUnless(HELLO.exists(), "build the example first: examples/build.sh NAME")
     def test_time_follows_the_clock(self):
         m = Machine(str(HELLO))
         m.cpu.cycles = 12_000_000                  # reset clock: 12 MHz bypass
@@ -25,7 +25,7 @@ class StatusTests(unittest.TestCase):
         self.assertTrue(lines[0].startswith("Emulated time: 2.00 s   (CPU clock 108 MHz"))
         self.assertEqual(lines[1], "State: idle, waiting for an interrupt")
 
-    @unittest.skipUnless(HELLO.exists(), "fw/build.sh hello_mcu not run")
+    @unittest.skipUnless(HELLO.exists(), "build the example first: examples/build.sh NAME")
     def test_rtc_second_follows_the_clock(self):
         m = Machine(str(HELLO))
         m.cpu.cycles = 12_000_000 - 1              # first second at the 12 MHz reset clock

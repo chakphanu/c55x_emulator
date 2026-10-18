@@ -2,12 +2,12 @@
 
 import unittest
 
-from c55x_emu.paths import ROOT
+from c55x_emu.paths import EXAMPLES_DIR
 from c55x_emu.bus import Bus
 from c55x_emu.i2c import BASE, CNT, DRR, DXR, MDR, SAR, STR, STR_BB, STR_NACK, STR_RRDY, I2c
 from c55x_emu.mcu import WAKE_POWER_KEY, Mcu, key_code
 
-HELLO_MCU = ROOT / "build" / "hello_mcu" / "hello_mcu.out"
+HELLO_MCU = EXAMPLES_DIR / "hello_mcu" / "hello_mcu.out"
 
 
 class Rig:
@@ -80,7 +80,7 @@ class I2cMcuTests(unittest.TestCase):
         self.assertEqual((key_code(0x11), key_code(0x40), key_code(0x7A)), (8, 13, None))
 
 
-@unittest.skipUnless(HELLO_MCU.exists(), "build Hello-MCU first: fw/build.sh hello_mcu")
+@unittest.skipUnless(HELLO_MCU.exists(), "build the example first: examples/build.sh NAME")
 class McuPowerTests(unittest.TestCase):
     def test_only_power_wakes_after_suspend(self):
         irqs = []

@@ -5,12 +5,12 @@ AIC23 register decoding (codec.py) and fw/hello_audio end to end."""
 import struct
 import unittest
 
-from c55x_emu.paths import ROOT
+from c55x_emu.paths import EXAMPLES_DIR
 from c55x_emu.codec import Codec
 from c55x_emu.registers import EmulationError
 from c55x_emu.testutil import machine, run
 
-HELLO_AUDIO = ROOT / "build" / "hello_audio" / "hello_audio.out"
+HELLO_AUDIO = EXAMPLES_DIR / "hello_audio" / "hello_audio.out"
 
 DMA0, DMA5 = 0x0C00, 0x0C00 + 5 * 0x20
 MCBSP0 = 0x2800
@@ -140,7 +140,7 @@ class CodecTests(unittest.TestCase):
         self.assertEqual(codec((5, 0x000), (6, 0x077)).gains(), (0.0, 0.0))      # output off
 
 
-@unittest.skipUnless(HELLO_AUDIO.exists(), "fw/build.sh hello_audio not run")
+@unittest.skipUnless(HELLO_AUDIO.exists(), "build the example first: examples/build.sh NAME")
 class HelloAudioTests(unittest.TestCase):
     def test_one_kilohertz_tone(self):
         from c55x_emu.machine import Machine

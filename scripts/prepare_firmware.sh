@@ -21,8 +21,7 @@ TI=${ZEN_TI_BIN:-$HOME/ti-cgt-c5500-4.4.1/bin}
 [ ! -e "$W/output" ] || { echo "$W/output exists; use a new WORKDIR" >&2; exit 1; }
 export ZEN_ROOT=$W ZEN_TI_BIN=$TI
 UPDATER=$(cd "$(dirname "$UPDATER")" && pwd)/$(basename "$UPDATER")
-cd "$TOOLS/scripts"
-python3 roundtrip_zen_touch.py "$UPDATER" -o "$W/output/roundtrip"
-python3 export_zen_code.py "$W/output/roundtrip/original/Jukebox2.jrm" -o "$W/output/code/Jukebox2_code_blocks"
+python3 "$TOOLS/scripts/roundtrip_zen_touch.py" "$UPDATER" -o "$W/output/roundtrip"
+python3 "$TOOLS/scripts/export_zen_code.py" "$W/output/roundtrip/original/Jukebox2.jrm" -o "$W/output/code/Jukebox2_code_blocks"
 python3 "$ROOT/tools/make_listing.py"
 echo "ready: scripts/run_firmware.sh $W [emulator options]"

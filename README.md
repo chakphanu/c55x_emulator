@@ -14,8 +14,10 @@ you supply your own updater EXE.
 
 ## Build
 
+Run everything from the repository root; all data paths hang off it (`ZEN_ROOT` overrides).
+
     rust/build.sh                  # builds build/py/c55x_core.so
-    python3 -m unittest discover -s tests -t tests
+    python3 -m unittest discover -s tests -t .
 
 ## Run the examples
 
