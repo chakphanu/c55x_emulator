@@ -37,6 +37,9 @@ Needs the firmware container tools from
 [zentouch-reverse-engineering](https://github.com/debauer/zentouch-reverse-engineering)
 (clone it next to this repo as `../public`, or set `ZEN_TOOLS`).
 
+The updater EXE is available from
+https://github.com/brianpipa/CreativeZen/tree/main/CreativeZenTouch.
+
     scripts/prepare_firmware.sh ZenTouchP4S_PCFW_LF_2_10_05.exe firmware-work
     scripts/run_firmware.sh firmware-work --seconds 5 --png lcd.png
 
