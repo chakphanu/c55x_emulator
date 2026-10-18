@@ -60,6 +60,16 @@ directory private: it contains the firmware.
 Without symbols from a reverse engineering project, reports show addresses instead of
 function names.
 
+## Graphical front end
+
+Needs PyQt5 (`pip install PyQt5`). Same image argument as the headless entry:
+
+    python3 -m c55x_emu.qt_ui build/examples/hello_lcd/hello_lcd.out
+    ZEN_ROOT=$PWD/firmware-work python3 -m c55x_emu.qt_ui jukebox2 --disk zen.img
+
+Options: `--disk FILE`, `--mute` (no live audio), `--scale N` (LCD zoom). Run it from the
+repository root; `jukebox2` needs a prepared firmware (see above).
+
 ## Environment variables
 
 | Variable | Meaning |
