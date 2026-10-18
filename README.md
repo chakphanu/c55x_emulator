@@ -65,12 +65,13 @@ function names.
 Needs PyQt5, which `uv` installs from `pyproject.toml` (extra `gui`). Same image argument
 as the headless entry:
 
-    uv run --extra gui python -m c55x_emu.qt_ui build/examples/hello_lcd/hello_lcd.out
-    ZEN_ROOT=$PWD/firmware-work uv run --extra gui python -m c55x_emu.qt_ui jukebox2 --disk zen.img
+    uv run --extra gui c55x-emu-gui build/examples/hello_lcd/hello_lcd.out
+    ZEN_ROOT=$PWD/firmware-work uv run --extra gui c55x-emu-gui jukebox2 --disk zen.img
 
 Options: `--disk FILE`, `--mute` (no live audio), `--scale N` (LCD zoom). Run it from the
 repository root; `jukebox2` needs a prepared firmware (see above). The headless parts
-need no Python packages. Without uv: `pip install PyQt5` and call `python3 -m ...`.
+need no Python packages; `uv run c55x-emu IMAGE` is the headless entry (same as
+`python3 -m c55x_emu`). Without uv: `pip install PyQt5` and call `python3 -m ...`.
 
 ## Environment variables
 

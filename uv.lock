@@ -5,7 +5,7 @@ requires-python = ">=3.10"
 [[package]]
 name = "c55x-emu"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 
 [package.optional-dependencies]
 gui = [
