@@ -1,0 +1,17 @@
+[package]
+name = "c55x_core"
+version = "0.1.0"
+edition = "2021"
+description = "TMS320C55x CPU core for the Python emulator in scripts/c55x_emu (PyO3 extension)"
+
+[lib]
+name = "c55x_core"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.27", features = ["extension-module"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
