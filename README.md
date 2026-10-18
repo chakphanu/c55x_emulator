@@ -73,6 +73,12 @@ repository root; `jukebox2` needs a prepared firmware (see above). The headless 
 need no Python packages; `uv run c55x-emu IMAGE` is the headless entry (same as
 `python3 -m c55x_emu`). Without uv: `pip install PyQt5` and call `python3 -m ...`.
 
+Player tab (LCD and keys) and debug tab (events, MCU registers and traffic):
+
+![Player tab](screens/player.jpg)
+
+![Debug tab](screens/debug.jpg)
+
 ## Environment variables
 
 | Variable | Meaning |
