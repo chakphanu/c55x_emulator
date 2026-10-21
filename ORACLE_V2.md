@@ -44,14 +44,18 @@ discriminating test.
    product to 40 bits. Citation: SPRU374E 4.47.10/4.47.11. Test: same
    file (the blanket check previously false-flagged and would have
    clamped them under SATD).
-6. Multiply constants are signed (MACK `Tx * #K16`, MPYK `ACx * #K`):
-   the algebraic text prints negatives raw (0x8000..0xffff, or
-   0xffff8000..0xffffffff sign-extended to 32 bits); any constant whose
-   32-bit view is >= 0x8000 is interpreted as its signed 16-bit value.
-   Citations: SPRU374E 4.47/4.48 operand rules ("the 16-bit signed
-   constant, K16, sign extended to 17 bits"). Tests:
-   tests/test_c55x_emu_oracle_v2.py (includes the real-code form
-   `AC0 = AC0 * #0xffffa99a`).
+6. Multiply constants are signed (MACK `Tx * #K16`, MPYK `ACx * #K`,
+   MPYMK/MACMK `Smem * #K8`): the algebraic text prints negatives raw
+   (0x8000..0xffff, or 0xffff8000..0xffffffff sign-extended to 32 bits);
+   any constant whose 32-bit view is >= 0x8000 is interpreted as its
+   signed 16-bit value. Citations: SPRU374E 4.47/4.48 operand rules
+   ("the 16-bit signed constant, K16, sign extended to 17 bits").
+   Tests: tests/test_c55x_emu_oracle_v2.py (includes the real-code form
+   `AC0 = AC0 * #0xffffa99a`). A firmware-wide audit (audit/
+   mul_const_audit.py) decoded every multiply-by-constant site from its
+   raw opcode bytes and confirmed the text rule matches the opcode
+   decode at all 35 sites across four forms (MACK K16, MPYK K16, MPYK
+   K8, MPYMK K8); audit output hash: eae4412f66bf5e515963b311a0a5163cc082ed18048514db2235d9de3eaa7738.
 7. Repeat-body trace visibility: RPT / RPTCC body PCs now appear in
    `trace_pcs` (same ring semantics as the fetch loop). Diagnostic only:
    no value or cycle change (asserted by test). Citation: none needed
