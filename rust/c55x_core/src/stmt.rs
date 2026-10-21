@@ -289,6 +289,12 @@ fn exec_body(m: &mut Core, i: &Insn, data: bool) -> R<Option<u32>> {
                 }
             }
             m.exec_compiled(&body)?;
+            // Trace the body execution with the same ring semantics as the
+            // fetch loop (run.rs): diagnostic only, no value or cycle change.
+            if let Some((max, t)) = &mut m.trace {
+                if t.len() == *max { t.pop_front(); }
+                t.push_back(body.addr);
+            }
             executed += 1;
         }
         if let Some((_, code)) = &i.repeat_condition {

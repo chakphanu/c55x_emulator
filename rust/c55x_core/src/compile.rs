@@ -244,7 +244,31 @@ fn bin(n: &Node<'_>, unsigned: bool, io: bool, mmap: bool) -> R<Expr> {
             } else if (acc(&a) && scalar(&b)) || (scalar(&a) && acc(&b)) {
                 Expr::SignedAccumulatorProduct(a, b)
             } else {
-                simple(Op::Mul, a, b)
+                // MACK (Tx * #K16) and MPYK (ACx * #K): the multiplier
+                // constant is SIGNED (SPRU374E 4.47/4.48 operand rules;
+                // K16 is sign extended to 17 bits), but the algebraic text
+                // prints it raw: negatives appear as 0x8000..0xffff (16
+                // bits) or 0xffff8000..0xffffffff (sign extended to 32
+                // bits, e.g. AC0 = AC0 * #0xffffa99a). A positive K16 can
+                // never be >= 0x8000, so any constant whose 32-bit view is
+                // >= 0x8000 is interpreted as its signed 16-bit value.
+                // Smem-constant (K8) forms are left untouched pending
+                // encoding evidence.
+                let treg = |x: &Expr| matches!(x, Expr::Reg(Reg::T(_), _));
+                let ac = |x: &Expr| matches!(x, Expr::Reg(Reg::Ac(_), _));
+                let printed_negative = |x: &Expr| matches!(x, Expr::Num(k)
+                    if (*k as u64) <= 0xFFFF_FFFF && ((*k as u64) & 0xFFFF_FFFF) >= 0x8000);
+                let to_signed = |x: Rc<Expr>| match &*x {
+                    Expr::Num(k) => Rc::new(Expr::Num(
+                        ((*k & 0xFFFF) as i64 - 0x1_0000) as i64)),
+                    _ => x,
+                };
+                if ((treg(&a) || ac(&a)) && printed_negative(&b))
+                    || (printed_negative(&a) && (treg(&b) || ac(&b))) {
+                    simple(Op::Mul, to_signed(a), to_signed(b))
+                } else {
+                    simple(Op::Mul, a, b)
+                }
             }
         }
         "+" | "-" => {
