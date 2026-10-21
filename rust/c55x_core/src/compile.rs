@@ -244,18 +244,24 @@ fn bin(n: &Node<'_>, unsigned: bool, io: bool, mmap: bool) -> R<Expr> {
             } else if (acc(&a) && scalar(&b)) || (scalar(&a) && acc(&b)) {
                 Expr::SignedAccumulatorProduct(a, b)
             } else {
-                // MACK (Tx * #K16) and MPYK (ACx * #K): the multiplier
-                // constant is SIGNED (SPRU374E 4.47/4.48 operand rules;
-                // K16 is sign extended to 17 bits), but the algebraic text
-                // prints it raw: negatives appear as 0x8000..0xffff (16
-                // bits) or 0xffff8000..0xffffffff (sign extended to 32
-                // bits, e.g. AC0 = AC0 * #0xffffa99a). A positive K16 can
-                // never be >= 0x8000, so any constant whose 32-bit view is
-                // >= 0x8000 is interpreted as its signed 16-bit value.
-                // Smem-constant (K8) forms are left untouched pending
-                // encoding evidence.
-                let treg = |x: &Expr| matches!(x, Expr::Reg(Reg::T(_), _));
-                let ac = |x: &Expr| matches!(x, Expr::Reg(Reg::Ac(_), _));
+                // Multiply constants are SIGNED in the 17-bit multiplier
+                // (SPRU374E 4.47/4.48: K16 "sign extended to 17 bits",
+                // K8 likewise). The dis55 -e output prints negatives as
+                // unsigned hex sign-extended to 32 bits, so a K8 -128
+                // appears as 0xffffff80 and a K16 -22186 as 0xffffa956.
+                // A positive signed constant can never have bit 15 set,
+                // so any constant whose 32-bit view is >= 0x8000 is
+                // negative. sext16(low 16) recovers both widths: for K8
+                // (0xffffffXX) low16 = 0xffXX and sext16(0xffXX) = sext8
+                // value; for K16 (0xffffXXXX) sext16 = the K16 value.
+                // Verified against asm55 round-trips of every form: MPYK
+                // K8/K16, MACK Tx*#K16, MPYMK/MACMK Smem*#K8. This is a
+                // text-level rule; the discriminating opcode bytes are
+                // documented in scratch/probe_k8.asm for the eventual
+                // opcode-based validation path.
+                let mult_operand = |x: &Expr| matches!(x,
+                    Expr::Reg(Reg::T(_), _) | Expr::Reg(Reg::Ac(_), _)
+                    | Expr::Mem { words: 1, port: false, .. });
                 let printed_negative = |x: &Expr| matches!(x, Expr::Num(k)
                     if (*k as u64) <= 0xFFFF_FFFF && ((*k as u64) & 0xFFFF_FFFF) >= 0x8000);
                 let to_signed = |x: Rc<Expr>| match &*x {
@@ -263,8 +269,8 @@ fn bin(n: &Node<'_>, unsigned: bool, io: bool, mmap: bool) -> R<Expr> {
                         ((*k & 0xFFFF) as i64 - 0x1_0000) as i64)),
                     _ => x,
                 };
-                if ((treg(&a) || ac(&a)) && printed_negative(&b))
-                    || (printed_negative(&a) && (treg(&b) || ac(&b))) {
+                if (mult_operand(&a) && printed_negative(&b))
+                    || (printed_negative(&a) && mult_operand(&b)) {
                     simple(Op::Mul, to_signed(a), to_signed(b))
                 } else {
                     simple(Op::Mul, a, b)

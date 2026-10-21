@@ -65,3 +65,24 @@ class RepeatBodyTraceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class K8ConstantTests(unittest.TestCase):
+    def test_mpyk_k8_negative(self):
+        # asm55 probe: MPYK #-128 encodes as 1e8040; dis55 -e -r prints
+        # AC0 = AC1 * #0xffffff80. sext16(0xff80) = -128 = sext8(0x80).
+        cpu, _ = machine("AC1 = #0x10000", "AC0 = AC1 * #0xffffff80")
+        run(cpu)
+        self.assertEqual(cpu.ac[0], (1 << 40) - (1 * 128))  # 1 * -128
+
+    def test_macmk_smem_k8_negative(self):
+        # asm55 probe: MPYMK *AR3,#-83 encodes as f861ad20
+        cpu, bus = machine("XAR3 = mar(*(#01600h))", "AC2 = *AR3 * #0xffffffad")
+        bus.write(0x1600, 0x0100)         # Smem = 0x0100
+        run(cpu)
+        self.assertEqual(cpu.ac[2], (1 << 40) - (0x100 * 83))  # 256 * -83
+
+    def test_positive_k8_unchanged(self):
+        cpu, bus = machine("XAR3 = mar(*(#01600h))", "AC2 = *AR3 * #0x53")
+        bus.write(0x1600, 0x0002)
+        run(cpu)
+        self.assertEqual(cpu.ac[2], 2 * 83)

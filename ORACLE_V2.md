@@ -6,7 +6,7 @@ core (SQDST-corrected snapshot; this repository's `8871bc9` is
 byte-identical to its source).
 
 - Build: `./rust/build.sh` -> `build/py/c55x_core.so`
-- SHA256: 28f97a4bf31f29a5fdd7a7e36126180323f153f759b7b2654d6101ac0c6680a5
+- SHA256: afcebfd440af00d594e6b7ada8494d174946fafd16681c26bc2cd620e0ef639c
 - Baseline for the semantic list below: `3dbef971e814e1e7...`
 - Test suite: 143 tests (only the two pre-existing example-artifact
   errors remain), plus a 1617-vector differential regression across five
