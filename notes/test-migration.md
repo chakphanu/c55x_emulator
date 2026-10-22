@@ -430,3 +430,7 @@ tool spelling. The expected values are unchanged:
 | semantics::standalone_conditional_execute_skips_the_next_instruction | `TC1 = #0` | `bit(ST0, #13) = #0` | no `TC1 = #0` spelling in asm55; dis55 prints the BCLR as bit(ST0, #13) |
 | semantics::goto_out_of_a_loop_ends_it | 1-instruction localrepeat body | body `T1 = T1 + #1`, `nop` | asm55 E0800: localrepeat body under the minimum size |
 | semantics::goto_out_of_a_loop_ends_it | `if (TC1) goto` out of a localrepeat | `.byte 0x61, 0x64` (its encoding, assembled outside the loop at the same address) | asm55 E0800 refuses a branch out of a localrepeat; real listings have it (mtp_proplist_count). dis55 lists the bytes back as the branch, so the listing stays tool output and no text-only fixture is needed |
+| acov::{count_below_minus_32_sets_the_destination_flag, clamped_count_result_is_confined_to_the_working_width} | `ACy = AC0 >> T0` with T0 = -33 | `ACy = AC0 << T0` | there is no `>> Tx` form: the shift by Tx is `<< Tx`, a negative count shifts right (the case the comment describes) |
+| acov::shift_m40::*, acov_mac::* | `AC0 = #0x10000`, `AC0 = #0x7FFFFFFF`, `AC0 = #-0x7FFFFFFF` | the test presets AC0 | asm55 E0003: constant out of range (no 32-bit load) |
+| acov::step_and_run_agree_on_immediate_shifts, acov_mac::step_and_run_agree_on_mac | `ACy = ACx >> #4` | `ACy = ACx << #-4` | asm55 E0003: `>> #k` needs the same register on both sides |
+| acov_mac::m40_off_negative_overflow_saturates | `AC0 = AC0 - (T1 * #0x7FFF)` | `AC0 = AC0 - (T1 * *AR3)`, *AR3 = 0x7FFF | asm55: no MAS with a constant |

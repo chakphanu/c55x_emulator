@@ -3,19 +3,12 @@
 
 mod common;
 
-use std::sync::OnceLock;
-
 use c55x_core::core::Core;
-use common::{read, read32, run, try_run, write, write32, Fixture};
-
-fn fixture() -> &'static Fixture {
-    static F: OnceLock<Fixture> = OnceLock::new();
-    F.get_or_init(|| Fixture::load("semantics"))
-}
+use common::{read, read32, run, try_run, write, write32};
 
 /// A core at the program t_NAME of the fixture.
 fn machine(name: &str) -> Core {
-    fixture().core(&format!("t_{}", name))
+    fixture!("semantics").core(&format!("t_{}", name))
 }
 
 #[test]

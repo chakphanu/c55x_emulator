@@ -125,3 +125,17 @@ pub fn read32(core: &mut Core, word: u32) -> u32 {
 pub fn write32(core: &mut Core, word: u32, v: u32) {
     core.write32(word, v as i128).unwrap_or_else(|e| panic!("{}", message(e)))
 }
+
+/// One instruction (Cpu.step).
+pub fn step(core: &mut Core) {
+    core.step().unwrap_or_else(|e| panic!("{} (pc 0x{:06x})", message(e), core.st.pc))
+}
+
+/// A cached fixture: one load per test binary.
+#[macro_export]
+macro_rules! fixture {
+    ($name:literal) => {{
+        static F: std::sync::OnceLock<common::Fixture> = std::sync::OnceLock::new();
+        F.get_or_init(|| common::Fixture::load($name))
+    }};
+}
