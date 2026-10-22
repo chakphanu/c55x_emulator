@@ -22,6 +22,17 @@ byte-identical to its source).
   gives PCM and per-call instruction counts identical to the Python path on
   every file. The extension's guest behavior is unchanged relative to
   3ab06717 (full suite per test, 1617 routine vectors, 58,400 fuzz cases).
+- Archive of the Python slow path: tag `python-slow-path-final` and branch
+  `archive/python-slow-path`, both at commit 95b0841. This is the last state
+  with the Zen Touch board, the Python `Machine` / `Cpu` / `Bus` slow path,
+  `PyHost` and the Python frontend. The repository is being reduced to a pure
+  C55x emulator from there on.
+  - The extension built at the tag is byte-identical to the reference
+    extension above (3539b077..., rebuilt from the tag with
+    `cargo build --release -p c55x_py`).
+  - A copy is kept as `build/archive-python/c55x_core.so`. It is the frozen
+    reference for external Python harnesses that build the core over a
+    Python `Cpu`.
 - SHA256 of the previous reference:
   3ab06717ed86678cb05dcb33a8a3b5662378e180403f87d1115c7c837d77de09, built from
   commit 65a3b09 (clean `git archive` export, same hash as a separate build).
@@ -123,6 +134,7 @@ discriminating test.
    raw opcode bytes and confirmed the text rule matches the opcode
    decode at all 35 sites across four forms (MACK K16, MPYK K16, MPYK
    K8, MPYMK K8); audit output hash: eae4412f66bf5e515963b311a0a5163cc082ed18048514db2235d9de3eaa7738.
+   The audit script is kept at tag `python-slow-path-final`.
 7. Repeat-body trace visibility: RPT / RPTCC body PCs now appear in
    `trace_pcs` (same ring semantics as the fetch loop). Diagnostic only:
    no value or cycle change (asserted by test). Citation: none needed

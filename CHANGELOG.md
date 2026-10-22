@@ -18,6 +18,19 @@ guide. Instruction spellings in the tests were checked by assembling them with
 `asm55` and reading them back with `dis55 -r -g`. Citations give section numbers
 only.
 
+## 2026-10-22: archive of the Python slow path
+
+No guest behavior change. Tag `python-slow-path-final` and branch
+`archive/python-slow-path` (commit 95b0841) keep the last state with the
+Zen Touch board models, the Python slow path (`Machine`, `Cpu`, `Bus`,
+`PyHost`) and the Python frontend.
+
+- After this point the repository becomes a pure C55x emulator with Rust as
+  the single source of truth.
+- The extension built at the tag is the reference 3539b077..., kept as
+  `build/archive-python/c55x_core.so` for external Python harnesses
+  (see `ORACLE_V2.md`).
+
 ## 2026-10-22
 
 A review of the core against the four manuals above. The core built from
