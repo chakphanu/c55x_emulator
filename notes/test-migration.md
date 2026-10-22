@@ -44,8 +44,8 @@ Format: Python file::Class.method | class | Rust target (path::[module::]name) o
 | test_c55x_emu::SemanticTests.test_long_result_keeps_its_width | keep | rust/c55x_core/tests/semantics.rs::long_result_keeps_its_width |
 | test_c55x_emu::SemanticTests.test_field_extract | keep | rust/c55x_core/tests/semantics.rs::field_extract |
 | test_c55x_emu::SemanticTests.test_unsupported_mode_raises | keep | rust/c55x_core/tests/semantics.rs::unsupported_mode_raises |
-| test_c55x_emu::LcdTests.test_page_column_and_data | delete | deleted with board |
-| test_c55x_emu::HelloLcdTests.test_draws_the_test_picture | delete | deleted with board |
+| test_c55x_emu::LcdTests.test_page_column_and_data | delete | deleted with board, done in 69f2583 |
+| test_c55x_emu::HelloLcdTests.test_draws_the_test_picture | delete | deleted with board, done in 69f2583 |
 | test_c55x_emu_acov::AcovTests.test_flags_are_clear_after_reset | keep | rust/c55x_core/tests/acov.rs::acov::flags_are_clear_after_reset |
 | test_c55x_emu_acov::AcovTests.test_in_range_count_leaves_the_flags_clear | keep | rust/c55x_core/tests/acov.rs::acov::in_range_count_leaves_the_flags_clear |
 | test_c55x_emu_acov::AcovTests.test_count_above_31_sets_the_destination_flag | keep | rust/c55x_core/tests/acov.rs::acov::count_above_31_sets_the_destination_flag |
@@ -83,11 +83,11 @@ Format: Python file::Class.method | class | Rust target (path::[module::]name) o
 | test_c55x_emu_audio::McBspStreamTests.test_block_interrupts_and_rate | rewrite | rust/c55x_core/tests/mcbsp.rs::block_interrupts_and_rate (audio clock as data, not a callback) |
 | test_c55x_emu_audio::McBspStreamTests.test_no_clock_no_samples | rewrite | rust/c55x_core/tests/mcbsp.rs::no_clock_no_samples (audio clock as data, not a callback) |
 | test_c55x_emu_audio::HiLoadTests.test_hi_takes_the_sign_into_the_guard_bits | keep | rust/c55x_core/tests/semantics.rs::hi_takes_the_sign_into_the_guard_bits |
-| test_c55x_emu_audio::CodecTests.test_usb_mode_rates | delete | deleted with board |
-| test_c55x_emu_audio::CodecTests.test_clock_needs_master_and_active | delete | deleted with board |
-| test_c55x_emu_audio::CodecTests.test_reset | delete | deleted with board |
-| test_c55x_emu_audio::CodecTests.test_headphone_gain | delete | deleted with board |
-| test_c55x_emu_audio::HelloAudioTests.test_one_kilohertz_tone | delete | deleted with board |
+| test_c55x_emu_audio::CodecTests.test_usb_mode_rates | delete | deleted with board, done in 69f2583 |
+| test_c55x_emu_audio::CodecTests.test_clock_needs_master_and_active | delete | deleted with board, done in 69f2583 |
+| test_c55x_emu_audio::CodecTests.test_reset | delete | deleted with board, done in 69f2583 |
+| test_c55x_emu_audio::CodecTests.test_headphone_gain | delete | deleted with board, done in 69f2583 |
+| test_c55x_emu_audio::HelloAudioTests.test_one_kilohertz_tone | delete | deleted with board, done in 69f2583 |
 | test_c55x_emu_containment::RejectedOutside.test_direct_construction_is_refused | keep | rust/c55x_core/tests/containment.rs::outside::direct_construction_is_refused (#[ignore], run outside the launcher) |
 | test_c55x_emu_containment::RejectedOutside.test_fake_environment_marker_alone_is_refused | keep | rust/c55x_core/tests/containment.rs::outside::fake_environment_marker_alone_is_refused (#[ignore], run outside the launcher) |
 | test_c55x_emu_containment::InsideJob.test_core_constructs_and_runs | keep | rust/c55x_core/tests/containment.rs::core_constructs_and_runs |
@@ -98,16 +98,16 @@ Format: Python file::Class.method | class | Rust target (path::[module::]name) o
 | test_c55x_emu_containment::InsideJob.test_descendants_share_the_task_limit | keep | rust/c55x_core/tests/containment.rs::descendants_share_the_task_limit |
 | test_c55x_emu_containment::InsideJob.test_small_tmpfs_allocation_is_charged_to_the_job | keep | rust/c55x_core/tests/containment.rs::small_tmpfs_allocation_is_charged_to_the_job |
 | test_c55x_emu_containment::InsideJob.test_trace_length_cap_is_an_explicit_error | keep | rust/c55x_core/tests/containment.rs::trace_length_cap_is_an_explicit_error |
-| test_c55x_emu_controls::ControlTests.test_buttons_hit_their_key_codes | delete | deleted with board |
-| test_c55x_emu_controls::ControlTests.test_touch_and_lock_events | delete | deleted with board |
-| test_c55x_emu_controls::LanguageMenuTests.test_navigation | delete | deleted with board |
-| test_c55x_emu_controls::LanguageMenuTests.test_power_off_and_on | delete | deleted with board |
-| test_c55x_emu_disk::AtaTests.test_identify_reports_the_capacity | delete | deleted with board |
-| test_c55x_emu_disk::AtaTests.test_write_then_read_multiple | delete | deleted with board |
-| test_c55x_emu_disk::AtaTests.test_unknown_command_aborts | delete | deleted with board |
-| test_c55x_emu_disk::ImageTests.test_partition_table_layout | delete | deleted with board |
-| test_c55x_emu_disk::ImageTests.test_minifs_file_round_trip | delete | deleted with board |
-| test_c55x_emu_disk::ImageTests.test_synthetic_disk_without_files | delete | deleted with board |
+| test_c55x_emu_controls::ControlTests.test_buttons_hit_their_key_codes | delete | deleted with board, done in 69f2583 |
+| test_c55x_emu_controls::ControlTests.test_touch_and_lock_events | delete | deleted with board, done in 69f2583 |
+| test_c55x_emu_controls::LanguageMenuTests.test_navigation | delete | deleted with board, done in 69f2583 |
+| test_c55x_emu_controls::LanguageMenuTests.test_power_off_and_on | delete | deleted with board, done in 69f2583 |
+| test_c55x_emu_disk::AtaTests.test_identify_reports_the_capacity | delete | deleted with board, done in 69f2583 |
+| test_c55x_emu_disk::AtaTests.test_write_then_read_multiple | delete | deleted with board, done in 69f2583 |
+| test_c55x_emu_disk::AtaTests.test_unknown_command_aborts | delete | deleted with board, done in 69f2583 |
+| test_c55x_emu_disk::ImageTests.test_partition_table_layout | delete | deleted with board, done in 69f2583 |
+| test_c55x_emu_disk::ImageTests.test_minifs_file_round_trip | delete | deleted with board, done in 69f2583 |
+| test_c55x_emu_disk::ImageTests.test_synthetic_disk_without_files | delete | deleted with board, done in 69f2583 |
 | test_c55x_emu_dsp::MantExpTests.test_spru375g_examples | keep | rust/c55x_core/tests/dsp.rs::mant_exp::spru375g_examples |
 | test_c55x_emu_dsp::MantExpTests.test_zero | keep | rust/c55x_core/tests/dsp.rs::mant_exp::zero |
 | test_c55x_emu_dsp::MantExpTests.test_split_indexed_coefficient | convert | rust/c55x_core/src/frontend/tests.rs::dual::split_indexed_coefficient |
@@ -128,17 +128,17 @@ Format: Python file::Class.method | class | Rust target (path::[module::]name) o
 | test_c55x_emu_dsp::AddressAndShiftTests.test_reserved_mmr_reads_zero | keep | rust/c55x_core/tests/dsp.rs::address_and_shift::reserved_mmr_reads_zero |
 | test_c55x_emu_gc::MachinesAreFreed.test_dropped_machines_are_collected | keep | rust/c55x_core/tests/lifecycle.rs::dropped_cores_are_collected (Drop and RSS instead of the Python collector) |
 | test_c55x_emu_gc::MachinesAreFreed.test_rss_does_not_grow_with_the_number_of_machines | keep | rust/c55x_core/tests/lifecycle.rs::rss_does_not_grow_with_the_number_of_cores (Drop and RSS instead of the Python collector) |
-| test_c55x_emu_idle::IdleTests.test_cpu_domain_active_runs_on | delete | deleted with board |
-| test_c55x_emu_idle::IdleTests.test_enabled_interrupt_wakes_with_intm_set | delete | deleted with board |
-| test_c55x_emu_idle::IdleTests.test_clock_stopped_waits_for_an_external_interrupt | delete | deleted with board |
-| test_c55x_emu_idle::IdleTests.test_interrupt_ends_idle_and_returns_after_it | delete | deleted with board |
+| test_c55x_emu_idle::IdleTests.test_cpu_domain_active_runs_on | delete | deleted with board, done in 69f2583 |
+| test_c55x_emu_idle::IdleTests.test_enabled_interrupt_wakes_with_intm_set | delete | deleted with board, done in 69f2583 |
+| test_c55x_emu_idle::IdleTests.test_clock_stopped_waits_for_an_external_interrupt | delete | deleted with board, done in 69f2583 |
+| test_c55x_emu_idle::IdleTests.test_interrupt_ends_idle_and_returns_after_it | delete | deleted with board, done in 69f2583 |
 | test_c55x_emu_irq::DispatchTests.test_vector_addresses | keep | rust/c55x_core/tests/irq.rs::vector_addresses |
 | test_c55x_emu_irq::DispatchTests.test_context_is_saved_and_restored | keep | rust/c55x_core/tests/irq.rs::context_is_saved_and_restored |
 | test_c55x_emu_irq::DispatchTests.test_priority_and_masking | keep | rust/c55x_core/tests/irq.rs::priority_and_masking |
 | test_c55x_emu_irq::DispatchTests.test_disabled_interrupt_stays_pending | keep | rust/c55x_core/tests/irq.rs::disabled_interrupt_stays_pending |
-| test_c55x_emu_irq::TimerTests.test_auto_reload_period | delete | deleted with board (timer.py) |
-| test_c55x_emu_jukebox2::Jukebox2BootTests.test_boot_reaches_mcu_init | delete | deleted with board |
-| test_c55x_emu_jukebox2::Jukebox2BootTests.test_cfs_format_with_the_original_code | delete | deleted with board |
+| test_c55x_emu_irq::TimerTests.test_auto_reload_period | delete | deleted with board (timer.py), done in 69f2583 |
+| test_c55x_emu_jukebox2::Jukebox2BootTests.test_boot_reaches_mcu_init | delete | deleted with board, done in 69f2583 |
+| test_c55x_emu_jukebox2::Jukebox2BootTests.test_cfs_format_with_the_original_code | delete | deleted with board, done in 69f2583 |
 | test_c55x_emu_long_words::LongWordAddressOrderTests.test_memory_load_both_parities_and_postincrement | keep | rust/c55x_core/tests/long_words.rs::memory_load_both_parities_and_postincrement |
 | test_c55x_emu_long_words::LongWordAddressOrderTests.test_memory_store_both_parities_and_postincrement | keep | rust/c55x_core/tests/long_words.rs::memory_store_both_parities_and_postincrement |
 | test_c55x_emu_long_words::LongWordAddressOrderTests.test_mmr_load_both_parities | keep | rust/c55x_core/tests/long_words.rs::mmr_load_both_parities |
@@ -191,21 +191,21 @@ Format: Python file::Class.method | class | Rust target (path::[module::]name) o
 | test_c55x_emu_manual_review::ExecuteConditionallyTests.test_parallel_store_keeps_the_pointer_update | keep | rust/c55x_core/tests/manual_review.rs::execute_conditionally::parallel_store_keeps_the_pointer_update |
 | test_c55x_emu_manual_review::SquareDistanceTests.test_manual_example | keep | rust/c55x_core/tests/manual_review.rs::square_distance::manual_example |
 | test_c55x_emu_manual_review::SquareDistanceTests.test_no_borrow_sets_carry | keep | rust/c55x_core/tests/manual_review.rs::square_distance::no_borrow_sets_carry |
-| test_c55x_emu_mcu::I2cMcuTests.test_register_read | delete | deleted with board |
-| test_c55x_emu_mcu::I2cMcuTests.test_command_with_argument | delete | deleted with board |
-| test_c55x_emu_mcu::I2cMcuTests.test_events_queue_and_empty_answer | delete | deleted with board |
-| test_c55x_emu_mcu::I2cMcuTests.test_absent_slave_nacks | delete | deleted with board |
-| test_c55x_emu_mcu::I2cMcuTests.test_key_codes | delete | deleted with board |
-| test_c55x_emu_mcu::McuPowerTests.test_only_power_wakes_after_suspend | delete | deleted with board |
-| test_c55x_emu_mcu::HelloMcuTests.test_start_up_and_event_display | delete | deleted with board |
-| test_c55x_emu_mcu::HelloMcuTests.test_timer_tick_interrupt | delete | deleted with board |
-| test_c55x_emu_nor::NorTests.test_software_id_and_exit | delete | deleted with board |
-| test_c55x_emu_nor::NorTests.test_cfi_size_exponent | delete | deleted with board |
-| test_c55x_emu_nor::NorTests.test_program_only_clears_bits | delete | deleted with board |
-| test_c55x_emu_nor::NorTests.test_sector_erase | delete | deleted with board |
-| test_c55x_emu_nor::NorTests.test_bad_unlock_is_counted | delete | deleted with board |
-| test_c55x_emu_nor::NorImageTests.test_table_and_checksum | delete | deleted with board |
-| test_c55x_emu_nor::NorImageTests.test_oversized_area_raises | delete | deleted with board |
+| test_c55x_emu_mcu::I2cMcuTests.test_register_read | delete | deleted with board, done in 69f2583 |
+| test_c55x_emu_mcu::I2cMcuTests.test_command_with_argument | delete | deleted with board, done in 69f2583 |
+| test_c55x_emu_mcu::I2cMcuTests.test_events_queue_and_empty_answer | delete | deleted with board, done in 69f2583 |
+| test_c55x_emu_mcu::I2cMcuTests.test_absent_slave_nacks | delete | deleted with board, done in 69f2583 |
+| test_c55x_emu_mcu::I2cMcuTests.test_key_codes | delete | deleted with board, done in 69f2583 |
+| test_c55x_emu_mcu::McuPowerTests.test_only_power_wakes_after_suspend | delete | deleted with board, done in 69f2583 |
+| test_c55x_emu_mcu::HelloMcuTests.test_start_up_and_event_display | delete | deleted with board, done in 69f2583 |
+| test_c55x_emu_mcu::HelloMcuTests.test_timer_tick_interrupt | delete | deleted with board, done in 69f2583 |
+| test_c55x_emu_nor::NorTests.test_software_id_and_exit | delete | deleted with board, done in 69f2583 |
+| test_c55x_emu_nor::NorTests.test_cfi_size_exponent | delete | deleted with board, done in 69f2583 |
+| test_c55x_emu_nor::NorTests.test_program_only_clears_bits | delete | deleted with board, done in 69f2583 |
+| test_c55x_emu_nor::NorTests.test_sector_erase | delete | deleted with board, done in 69f2583 |
+| test_c55x_emu_nor::NorTests.test_bad_unlock_is_counted | delete | deleted with board, done in 69f2583 |
+| test_c55x_emu_nor::NorImageTests.test_table_and_checksum | delete | deleted with board, done in 69f2583 |
+| test_c55x_emu_nor::NorImageTests.test_oversized_area_raises | delete | deleted with board, done in 69f2583 |
 | test_c55x_emu_oracle_v2::K16ConstantTests.test_mpyk_negative_print_sign_extends | keep | rust/c55x_core/tests/oracle_v2.rs::k16_constant::mpyk_negative_print_sign_extends |
 | test_c55x_emu_oracle_v2::K16ConstantTests.test_k16_constant_sign_extends | keep | rust/c55x_core/tests/oracle_v2.rs::k16_constant::k16_constant_sign_extends |
 | test_c55x_emu_oracle_v2::K16ConstantTests.test_positive_k16_unchanged | keep | rust/c55x_core/tests/oracle_v2.rs::k16_constant::positive_k16_unchanged |
@@ -215,9 +215,9 @@ Format: Python file::Class.method | class | Rust target (path::[module::]name) o
 | test_c55x_emu_oracle_v2::K8ConstantTests.test_mpyk_k8_negative | keep | rust/c55x_core/tests/oracle_v2.rs::k8_constant::mpyk_k8_negative |
 | test_c55x_emu_oracle_v2::K8ConstantTests.test_macmk_smem_k8_negative | keep | rust/c55x_core/tests/oracle_v2.rs::k8_constant::macmk_smem_k8_negative |
 | test_c55x_emu_oracle_v2::K8ConstantTests.test_positive_k8_unchanged | keep | rust/c55x_core/tests/oracle_v2.rs::k8_constant::positive_k8_unchanged |
-| test_c55x_emu_pacing::PacerTests.test_follows_the_wall_clock | delete | deleted with board |
-| test_c55x_emu_pacing::PacerTests.test_slow_emulator_lags_at_most_max_lag | delete | deleted with board |
-| test_c55x_emu_pacing::PacerTests.test_rebase | delete | deleted with board |
+| test_c55x_emu_pacing::PacerTests.test_follows_the_wall_clock | delete | deleted with board, done in 69f2583 |
+| test_c55x_emu_pacing::PacerTests.test_slow_emulator_lags_at_most_max_lag | delete | deleted with board, done in 69f2583 |
+| test_c55x_emu_pacing::PacerTests.test_rebase | delete | deleted with board, done in 69f2583 |
 | test_c55x_emu_resource_caps::BusCaps.test_address_space_is_the_architectural_16_mib | rewrite | rust/c55x_core/tests/resource_caps.rs::address_space_is_the_architectural_16_mib (NativeHost memory and loader) |
 | test_c55x_emu_resource_caps::BusCaps.test_load_outside_the_address_space_is_refused | rewrite | rust/c55x_core/tests/resource_caps.rs::load_outside_the_address_space_is_refused (NativeHost memory and loader) |
 | test_c55x_emu_resource_caps::BusCaps.test_many_small_loads_stay_fast_and_keep_no_history | rewrite | rust/c55x_core/tests/resource_caps.rs::many_small_loads_stay_fast_and_keep_no_history (NativeHost memory and loader) |
@@ -228,9 +228,9 @@ Format: Python file::Class.method | class | Rust target (path::[module::]name) o
 | test_c55x_emu_sftl::SftlTests.test_right_by_one_clears_the_guards | keep | rust/c55x_core/tests/sftl.rs::right_by_one_clears_the_guards |
 | test_c55x_emu_sftl::SftlTests.test_register_destination_shifts_16_bits | keep | rust/c55x_core/tests/sftl.rs::register_destination_shifts_16_bits |
 | test_c55x_emu_sftl::SftlTests.test_zero_count_clears_carry | keep | rust/c55x_core/tests/sftl.rs::zero_count_clears_carry |
-| test_c55x_emu_status::StatusTests.test_duration | delete | deleted with board |
-| test_c55x_emu_status::StatusTests.test_time_follows_the_clock | delete | deleted with board |
-| test_c55x_emu_status::StatusTests.test_rtc_second_follows_the_clock | delete | deleted with board |
+| test_c55x_emu_status::StatusTests.test_duration | delete | deleted with board, done in 69f2583 |
+| test_c55x_emu_status::StatusTests.test_time_follows_the_clock | delete | deleted with board, done in 69f2583 |
+| test_c55x_emu_status::StatusTests.test_rtc_second_follows_the_clock | delete | deleted with board, done in 69f2583 |
 | test_c55x_frontend::FrontendTest.test_listing_readers_agree | convert | rust/c55x_core/src/frontend/tests.rs::synthetic::listing_readers_agree |
 | test_c55x_frontend::FrontendTest.test_listing_errors_agree | convert | rust/c55x_core/src/frontend/tests.rs::synthetic::listing_errors_agree |
 | test_c55x_frontend::FrontendTest.test_synthetic_listing | convert | rust/c55x_core/src/frontend/tests.rs::synthetic::synthetic_listing |
@@ -271,11 +271,11 @@ Format: Python file::Class.method | class | Rust target (path::[module::]name) o
 | test_c55x_launcher::MockedLauncherTests.test_job_side_verification_checks_the_slot_unit_and_the_shared_values | infra | stays a launcher test (python3, tests bin/c55x-contained only) |
 | test_c55x_launcher::MockedLauncherTests.test_job_side_verification_checks_the_address_space_of_each_class | infra | stays a launcher test (python3, tests bin/c55x-contained only) |
 | test_c55x_launcher::MockedLauncherTests.test_launch_asks_systemd_for_the_address_space_of_its_class | infra | stays a launcher test (python3, tests bin/c55x-contained only) |
-| test_c55x_mtpscript::ParserTest.test_data_of_unknown_length_ends_at_its_response | delete | deleted with board |
-| test_c55x_mtpscript::ParserTest.test_prop_list | delete | deleted with board |
-| test_c55x_mtpscript::ParserTest.test_session_ends_with_reset_device | delete | deleted with board |
-| test_c55x_mtpscript::ParserTest.test_u32_array | delete | deleted with board |
-| test_c55x_mtpscript::ScriptTest.test_next_step_waits_for_the_answers_and_sees_them | delete | deleted with board |
+| test_c55x_mtpscript::ParserTest.test_data_of_unknown_length_ends_at_its_response | delete | deleted with board, done in 69f2583 |
+| test_c55x_mtpscript::ParserTest.test_prop_list | delete | deleted with board, done in 69f2583 |
+| test_c55x_mtpscript::ParserTest.test_session_ends_with_reset_device | delete | deleted with board, done in 69f2583 |
+| test_c55x_mtpscript::ParserTest.test_u32_array | delete | deleted with board, done in 69f2583 |
+| test_c55x_mtpscript::ScriptTest.test_next_step_waits_for_the_answers_and_sees_them | delete | deleted with board, done in 69f2583 |
 | test_c55x_native_policy::NativePolicyTests.test_policy_unit_tests_pass | infra | `cargo test -p c55x_core policy::` (policy.rs unit tests run directly; Python wrapper deleted) |
 
 
@@ -461,3 +461,15 @@ cargo rebuilds. Every mutation was caught:
 
 Trap: restoring a file with `mv` keeps an mtime older than the mutated build, and cargo
 then keeps the mutated binary. Touch the file after restoring it.
+
+## 9. Status at ea461a1
+
+The Python files left in tests/:
+- test_c55x_emu_containment.py: the trace cap test, until Core::set_trace carries the cap.
+- test_c55x_emu_resource_caps.py: BusCaps, ImageCaps and CodeCacheCap, until the core exposes
+  its load bounds and caps.
+- test_c55x_launcher.py: stays Python by the owner exception.
+- test_c55x_run.py: tests the CLI, not covered by this migration's mapping.
+
+The 50 board tests went in 69f2583. The McBSP tests are tests/mcbsp.rs, and
+test_c55x_emu_audio.py is deleted.
