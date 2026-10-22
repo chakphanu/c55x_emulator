@@ -72,8 +72,8 @@ Format: Python file::Class.method | class | Rust target (path::[module::]name) o
 | test_c55x_emu_addressing::M40Tests.test_m40_off_keeps_32_bit_semantics | keep | rust/c55x_core/tests/addressing.rs::m40::m40_off_keeps_32_bit_semantics |
 | test_c55x_emu_addressing::M40Tests.test_m40_on_uses_the_guard_bits | keep | rust/c55x_core/tests/addressing.rs::m40::m40_on_uses_the_guard_bits |
 | test_c55x_emu_addressing::M40Tests.test_sign_extended_low_byte | keep | rust/c55x_core/tests/addressing.rs::m40::sign_extended_low_byte |
-| test_c55x_emu_addressing::CarryTests.test_64_bit_add | keep | rust/c55x_core/tests/addressing.rs::carry::64_bit_add |
-| test_c55x_emu_addressing::CarryTests.test_64_bit_subtract | keep | rust/c55x_core/tests/addressing.rs::carry::64_bit_subtract |
+| test_c55x_emu_addressing::CarryTests.test_64_bit_add | keep | rust/c55x_core/tests/addressing.rs::carry::_64_bit_add |
+| test_c55x_emu_addressing::CarryTests.test_64_bit_subtract | keep | rust/c55x_core/tests/addressing.rs::carry::_64_bit_subtract |
 | test_c55x_emu_addressing::CarryTests.test_product_leaves_carry | keep | rust/c55x_core/tests/addressing.rs::carry::product_leaves_carry |
 | test_c55x_emu_addressing::BitFieldTests.test_band_sets_tc_on_any_bit | keep | rust/c55x_core/tests/addressing.rs::bit_field::band_sets_tc_on_any_bit |
 | test_c55x_emu_addressing::MmrLoadTests.test_mmr_load_sign_extends_like_memory | keep | rust/c55x_core/tests/addressing.rs::mmr_load::mmr_load_sign_extends_like_memory |
@@ -438,3 +438,6 @@ tool spelling. The expected values are unchanged:
 | oracle_v2::k16_constant::*, k8_constant::* | `#0xffffa99a`, `#0xffffe200`, `#0xffffff80`, `#0xffffffad`, `#0x8000` (dis55 -e prints) | `#-22118`, `#-7680`, `#-128`, `#-83`, `#-32768` | the runtime listing prints negative constants as such; same encodings |
 | oracle_v2::k8_constant::mpyk_k8_negative | `AC1 = #0x10000` | the test presets AC1 | asm55 E0003: constant out of range |
 | lifecycle::* (test_c55x_emu_gc) | weakref / gc.collect | build, touch all 16 MiB, drop; RSS must not grow (freed memory reused) | Rust frees on drop; the allocator may keep freed memory for reuse, so return to the OS is not required |
+| addressing::m40::* | `TC1 = AC0 == #0` | `TC1 = AC0 == AC1` (AC1 = 0 at that point) | asm55 has no compare with a constant into TCx |
+| addressing::carry::product_leaves_carry | `AC0 = AC0 + (T0 * T1)` | `AC0 = AC0 + (AC1 * T1)` | asm55 has no Tx * Ty MAC; the test only needs a MAC after the borrow |
+| addressing::carry::_64_bit_add / _64_bit_subtract | test_64_bit_add / test_64_bit_subtract | leading underscore | a Rust name cannot start with a digit |

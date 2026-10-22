@@ -139,3 +139,9 @@ macro_rules! fixture {
         F.get_or_init(|| common::Fixture::load($name))
     }};
 }
+
+/// A plain storage register by its registers.PLAIN name (bk03, bsa23, ...).
+pub fn plain<'a>(core: &'a mut Core, name: &str) -> &'a mut u32 {
+    let i = c55x_core::state::PLAIN.iter().position(|p| *p == name).unwrap_or_else(|| panic!("no register {}", name));
+    &mut core.st.plain[i]
+}
