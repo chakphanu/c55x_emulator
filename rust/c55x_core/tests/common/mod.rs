@@ -107,6 +107,12 @@ pub fn try_step(core: &mut Core) -> Result<(), String> {
     core.step().map_err(message)
 }
 
+/// Cpu.run(max_steps, until=until): Ok(true) when stuck idle with nothing scheduled.
+pub fn try_run_until(core: &mut Core, max_steps: u64, until: u64) -> Result<bool, String> {
+    entry()?;
+    core.run(max_steps, &PcFilter::default(), Some(until)).map_err(message)
+}
+
 /// testutil.run: the idle loop must be reached.
 pub fn run(core: &mut Core) {
     match try_run(core) {

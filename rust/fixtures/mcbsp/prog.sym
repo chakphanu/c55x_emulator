@@ -1,0 +1,10 @@
+.text 0x020000
+.text 0x020000
+.text 0x020000
+___text__ 0x020000
+t_stream 0x020000
+e_stream 0x020046
+t_no_clock_no_samples 0x020048
+e_no_clock_no_samples 0x02005b
+___etext__ 0x02005e
+etext 0x02005e
