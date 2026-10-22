@@ -1,5 +1,5 @@
 //! Static guards for the single source of truth (AGENTS.md): the core stays free of
-//! Python and nothing outside the Rust crates implements its host interface. These tests
+//! Python and only the core's native host implements its host interface. These tests
 //! only read files; they build no core and need no TI tools.
 
 use std::fs;
@@ -98,8 +98,7 @@ fn core_source_has_no_python_binding() {
 
 #[test]
 fn only_rust_hosts_implement_host() {
-    // The Python host is the one exception until the Python slow path goes (cleanup 10B).
-    let allowed = ["c55x_core/src/native.rs", "c55x_py/src/pyhost.rs"];
+    let allowed = ["c55x_core/src/native.rs"];
     let root = rust_dir();
     let mut hits = Vec::new();
     for path in rust_files(&root) {
