@@ -9,6 +9,16 @@ impl Core {
         unsafe { *self.mem.add(byte_addr as usize & (MEM_BYTES - 1)) }
     }
 
+    /// The whole memory (MEM_BYTES bytes: program bytes, data word w at 2w..2w+1).
+    pub fn memory(&self) -> &[u8] {
+        unsafe { std::slice::from_raw_parts(self.mem, MEM_BYTES) }
+    }
+
+    /// The whole memory for a host's direct writes (no MMRs, hooks or code invalidation).
+    pub fn memory_mut(&mut self) -> &mut [u8] {
+        unsafe { std::slice::from_raw_parts_mut(self.mem, MEM_BYTES) }
+    }
+
     /// Store bytes straight into memory: no MMRs, hooks or code invalidation (Bus.load);
     /// bytes beyond the address space are refused, not wrapped.
     pub fn load_bytes(&mut self, byte_addr: u32, data: &[u8]) -> R<()> {
