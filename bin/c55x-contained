@@ -41,9 +41,9 @@ MAX_MEM_BYTES = 2 * GIB          # hard ceiling for one job
 MAX_CPU_SEC = 600
 MAX_WALL_SEC = 900
 MIN_HEADROOM_BYTES = 16 * GIB    # host MemAvailable needed to admit a job
-SLICE_MEM_MAX = 10 * GIB
-SLICE_MEM_HIGH = 9 * GIB
-SLICE_TASKS = 320
+SLICE_MEM_MAX = 18 * GIB
+SLICE_MEM_HIGH = 17 * GIB
+SLICE_TASKS = 448
 SLICE_CPU_QUOTA = (1000000, 100000)
 JOB_TASKS = 32
 JOB_CPU_QUOTA = (100000, 100000)
@@ -133,8 +133,16 @@ def unit_props(env, unit, *names):
     return props
 
 
-def unit_active(env, unit):
-    return systemctl(env, "is-active", "--quiet", unit).returncode == 0
+def unit_state(env, unit):
+    """ActiveState of the unit ("" if it cannot be read)."""
+    return unit_props(env, unit, "ActiveState").get("ActiveState", "")
+
+
+def state_is_free(state):
+    # Only a unit that is not loaded (reported as inactive), inactive or
+    # failed leaves its slot free; activating, active, reloading,
+    # deactivating (the stop grace) or an unreadable state keep it busy.
+    return state in ("inactive", "failed")
 
 
 def set_slice_limits(env):
@@ -224,9 +232,9 @@ class Admission:
         self.busy = []
 
     def acquire(self, env):
-        """Take the first slot whose lock is free and whose unit is not
-        active. Returns its unit name, or None with self.busy describing
-        every slot when all are taken."""
+        """Take the first slot whose lock is free and whose unit is
+        inactive, failed or not loaded. Returns its unit name, or None with
+        self.busy describing every slot when all are taken."""
         LOCK_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.busy = []
         for k in range(slot_count()):
@@ -240,9 +248,10 @@ class Admission:
                     self.busy.append("%s held" % unit)
                     continue
                 raise
-            if unit_active(env, unit):     # e.g. orphaned by a dead launcher
+            state = unit_state(env, unit)
+            if not state_is_free(state):   # e.g. orphaned by a dead launcher
                 os.close(fd)
-                self.busy.append("%s still running" % unit)
+                self.busy.append("%s %s" % (unit, state or "state unreadable"))
                 continue
             os.ftruncate(fd, 0)
             os.write(fd, b"%d\n" % os.getpid())
@@ -427,8 +436,8 @@ def run_job(args):
         unit = adm.acquire(env)
         if unit is None:
             die(RC_BUSY, "busy", "all %d emulator slots are busy (%s); wait for one (a unit "
-                "still running without a launcher stops by itself within its wall-time "
-                "limit)" % (slot_count(), ", ".join(adm.busy) or "none configured"))
+                "running without a launcher stops by itself within its wall-time limit)"
+                % (slot_count(), ", ".join(adm.busy) or "none configured"))
         systemctl(env, "reset-failed", unit)      # clear only a finished leftover
     else:
         unit = "c55x-work-%d-%s.service" % (os.getpid(), uuid.uuid4().hex[:8])
@@ -459,6 +468,9 @@ def run_job(args):
              "--as-bytes", str(as_bytes), "--"]
     cmd += ["--", *inner, *args.cmd]
 
+    # A unit of this name that is still loaded keeps its InvocationID if
+    # systemd-run cannot start ours; its Result must not be reported as ours.
+    before = unit_props(env, unit, "InvocationID").get("InvocationID", "")
     proc = subprocess.Popen(cmd, env=env)
     state = {"signal": None}
 
@@ -480,6 +492,14 @@ def run_job(args):
         die(128 + state["signal"], "interrupted",
             "launcher received signal %d; its job unit was stopped" % state["signal"])
 
+    after = unit_props(env, unit, "LoadState", "InvocationID", "ActiveState")
+    if after.get("LoadState", "") not in ("", "not-found") and \
+            after.get("InvocationID", "") == before:
+        if adm:
+            adm.release()
+        die(RC_BUSY, "busy", "systemd-run (rc=%d) did not start a new %s: a unit of that "
+            "name is still loaded (ActiveState=%s); wait and retry" % (
+                rc, unit, after.get("ActiveState", "") or "unknown"))
     code, outcome, msg = classify(env, unit, rc, args.cpu_sec)
     if adm:
         adm.release()
@@ -500,15 +520,18 @@ def parse_mem(args):
 
 
 def do_status(env):
-    set_slice_limits(env)
+    # Read-only: a status query never changes the live slice.
     p = unit_props(env, SLICE, "MemoryMax", "MemorySwapMax", "TasksMax")
     avail = mem_available()
     print("slice %s: MemoryMax=%s MemorySwapMax=%s TasksMax=%s" % (
         SLICE, p.get("MemoryMax"), p.get("MemorySwapMax"), p.get("TasksMax")))
     for k in range(slot_count()):
         unit = slot_unit(k)
-        print("emulator slot %d: %s %s" % (
-            k, "busy" if unit_active(env, unit) else "free", unit))
+        state = unit_state(env, unit)
+        if state_is_free(state):
+            print("emulator slot %d: free %s" % (k, unit))
+        else:
+            print("emulator slot %d: busy %s (%s)" % (k, unit, state or "state unreadable"))
     print("host MemAvailable: %.1f GiB (need %d GiB) -> admission %s" % (
         avail / GIB, MIN_HEADROOM_BYTES // GIB,
         "ok" if avail >= MIN_HEADROOM_BYTES else "refused (low headroom)"))

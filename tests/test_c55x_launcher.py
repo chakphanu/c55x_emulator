@@ -89,8 +89,8 @@ def fake_job_tree(root, unit, mem_max):
     g = 1 << 30
     vals = {job: {"memory.max": str(mem_max), "memory.swap.max": "0", "pids.max": "32",
                   "memory.oom.group": "1", "cpu.max": "100000 100000"},
-            slc: {"memory.max": str(10 * g), "memory.high": str(9 * g),
-                  "memory.swap.max": "0", "pids.max": "320", "cpu.max": "1000000 100000"}}
+            slc: {"memory.max": str(18 * g), "memory.high": str(17 * g),
+                  "memory.swap.max": "0", "pids.max": "448", "cpu.max": "1000000 100000"}}
     for d, kv in vals.items():
         for k, v in kv.items():
             (d / k).write_text(v + "\n")
@@ -149,7 +149,7 @@ class LauncherTests(unittest.TestCase):
             self.assertEqual(v["slice"], "c55x.slice")
             self.assertEqual(v["unit"] in EMU_UNITS, job == "emulator")
             self.assertEqual(v["job"], [str(64 << 20), "0", "32", "1", "100000 100000"])
-            self.assertEqual(v["shared"], [str(10 * g), str(9 * g), "0", "320", "1000000 100000"])
+            self.assertEqual(v["shared"], [str(18 * g), str(17 * g), "0", "448", "1000000 100000"])
 
     def test_argv_cwd_streams_stdin_and_exit_code_are_preserved(self):
         code = ("import sys,os,json\n"
@@ -332,7 +332,7 @@ class LauncherTests(unittest.TestCase):
         self.assertTrue(unit_active(), "the job must outlive its launcher")
         r = launch("--mem", "64M", "--wall-sec", "5", "--", "true", env=ONE_SLOT)
         self.assertEqual(r.returncode, 75, r.stderr)
-        self.assertIn("c55x-emu.service still running", r.stderr)
+        self.assertIn("c55x-emu.service active", r.stderr)
         self.assertTrue(unit_active(), "the replacement must not have killed the orphan")
         got = self.tmp / "unit"                     # the next slot is still available
         r = launch("--mem", "64M", "--wall-sec", "10", "--", PY, "-c", UNIT_OF_JOB, str(got), "0",
@@ -364,8 +364,8 @@ class LauncherTests(unittest.TestCase):
         for k, unit in enumerate(EMU_UNITS):
             self.assertIn("emulator slot %d: free %s" % (k, unit), r.stdout)
         self.assertNotIn("emulator slot 8", r.stdout)
-        self.assertIn("MemoryMax=10737418240", r.stdout)
-        self.assertIn("TasksMax=320", r.stdout)
+        self.assertIn("MemoryMax=19327352832", r.stdout)
+        self.assertIn("TasksMax=448", r.stdout)
 
     # ---- the core guard seen from the launcher --------------------------
 
@@ -420,20 +420,35 @@ class LauncherTests(unittest.TestCase):
 
 
 class MockedLauncherTests(unittest.TestCase):
-    """Slot naming, the C55X_TEST_SLOTS hook, the slot choice and the
-    job-side verifier, against a fake unit table, a private lock directory
-    and mocked kernel trees. No systemd call and no subprocess is made, and
-    the real locks are never touched, so these run anywhere."""
+    """Slot naming, the C55X_TEST_SLOTS hook, the slot choice, unit start
+    failures, --status and the job-side verifier, against a fake unit table,
+    a private lock directory and mocked kernel trees. No systemd call and no
+    subprocess is made, and the real locks are never touched, so these run
+    anywhere."""
 
     def setUp(self):
         TMP.mkdir(parents=True, exist_ok=True)
         self.tmp = pathlib.Path(tempfile.mkdtemp(dir=TMP))
         self.addCleanup(shutil.rmtree, self.tmp)
-        self.active = set()
+        self.states = {}           # unit -> ActiveState (default inactive, not loaded)
+        self.props = {}            # unit -> other properties (LoadState, InvocationID, ...)
+        self.unreadable = set()    # units whose `show` fails
+        self.calls = []
 
         def fake_systemctl(env, *args):
-            self.assertEqual(args[:2], ("is-active", "--quiet"))
-            return subprocess.CompletedProcess(args, 0 if args[2] in self.active else 3)
+            self.calls.append(args)
+            if args[0] == "show":
+                unit, names = args[1], args[3::2]
+                if unit in self.unreadable:
+                    return subprocess.CompletedProcess(args, 1, "", "")
+                state = self.states.get(unit, "inactive")
+                props = {"ActiveState": state, "InvocationID": "",
+                         "LoadState": "not-found" if state == "inactive" else "loaded"}
+                props.update(self.props.get(unit, {}))
+                out = "".join("%s=%s\n" % (n, props.get(n, "")) for n in names)
+                return subprocess.CompletedProcess(args, 0, out, "")
+            self.assertIn(args[0], ("set-property", "reset-failed", "stop"), args)
+            return subprocess.CompletedProcess(args, 0, "", "")
 
         for p in (mock.patch.object(L, "systemctl", fake_systemctl),
                   mock.patch.object(L, "LOCK_DIR", self.tmp / "locks"),
@@ -471,7 +486,7 @@ class MockedLauncherTests(unittest.TestCase):
         c.release()
 
     def test_active_unit_blocks_only_its_slot_and_its_lock_is_not_kept(self):
-        self.active = {EMU_UNIT, "c55x-emu-2.service"}      # e.g. orphans of dead launchers
+        self.states = {EMU_UNIT: "active", "c55x-emu-2.service": "active"}   # e.g. orphans
         a, b = L.Admission(), L.Admission()
         self.assertEqual(a.acquire(None), "c55x-emu-1.service")
         self.assertEqual(b.acquire(None), "c55x-emu-3.service")
@@ -484,21 +499,45 @@ class MockedLauncherTests(unittest.TestCase):
         a.release()
         b.release()
 
+    def test_unit_states_other_than_inactive_or_failed_keep_a_slot_busy(self):
+        for state in ("activating", "active", "reloading", "deactivating", "maintenance",
+                      "refreshing", ""):
+            with self.subTest(state=state):
+                self.states = {EMU_UNIT: state}
+                a = L.Admission()
+                self.assertEqual(a.acquire(None), "c55x-emu-1.service")
+                self.assertEqual(a.busy, ["c55x-emu.service %s" % (state or "state unreadable")])
+                a.release()
+        self.states = {}
+        self.unreadable = {EMU_UNIT}                         # `systemctl show` fails
+        a = L.Admission()
+        self.assertEqual(a.acquire(None), "c55x-emu-1.service")
+        self.assertEqual(a.busy, ["c55x-emu.service state unreadable"])
+        a.release()
+        self.unreadable = set()
+        for state in ("inactive", "failed"):
+            with self.subTest(state=state):
+                self.states = {EMU_UNIT: state}
+                a = L.Admission()
+                self.assertEqual(a.acquire(None), EMU_UNIT)
+                a.release()
+
     def test_no_free_slot_names_every_slot(self):
-        self.active = set(EMU_UNITS[1:])
+        self.states = dict.fromkeys(EMU_UNITS[1:], "active")
         holder = L.Admission()
         self.assertEqual(holder.acquire(None), EMU_UNIT)
         other = L.Admission()
         self.assertIsNone(other.acquire(None))
         self.assertIsNone(other.fd)
         self.assertEqual(other.busy, ["c55x-emu.service held"] +
-                         ["%s still running" % u for u in EMU_UNITS[1:]])
+                         ["%s active" % u for u in EMU_UNITS[1:]])
         holder.release()
         os.environ["C55X_TEST_SLOTS"] = "0"
         self.assertIsNone(L.Admission().acquire(None))
 
     def test_launcher_exits_75_when_every_slot_is_busy(self):
-        self.active = set(EMU_UNITS)
+        self.states = dict.fromkeys(EMU_UNITS, "active")
+        self.states["c55x-emu-4.service"] = "deactivating"
         err = io.StringIO()
         with mock.patch.object(L, "user_bus_env", lambda: ({}, self.tmp)), \
                 mock.patch.object(L, "mem_available", lambda: 64 << 30), \
@@ -508,7 +547,9 @@ class MockedLauncherTests(unittest.TestCase):
         self.assertEqual(cm.exception.code, 75)
         self.assertIn("outcome=busy all 8 emulator slots are busy", err.getvalue())
         for u in EMU_UNITS:
-            self.assertIn(u + " still running", err.getvalue())
+            state = "deactivating" if u == "c55x-emu-4.service" else "active"
+            self.assertIn("%s %s" % (u, state), err.getvalue())
+        self.assertFalse([c for c in self.calls if c[0] == "set-property"])
         os.environ["C55X_TEST_SLOTS"] = "2"
         err = io.StringIO()
         with mock.patch.object(L, "user_bus_env", lambda: ({}, self.tmp)), \
@@ -519,6 +560,86 @@ class MockedLauncherTests(unittest.TestCase):
         self.assertEqual(cm.exception.code, 75)
         self.assertIn("all 2 emulator slots are busy", err.getvalue())
         self.assertNotIn("c55x-emu-2.service", err.getvalue())
+
+    def _launch_mocked(self, on_wait, rc, argv=("--mem", "64M")):
+        """L.main for one launch whose systemd-run is a fake: on_wait runs
+        when the launcher waits for it, rc is its exit status."""
+        class FakeProc:
+            def __init__(self, cmd, env=None):
+                self.cmd = cmd
+
+            def wait(self):
+                on_wait()
+                return rc
+        err = io.StringIO()
+        with mock.patch.object(L, "user_bus_env", lambda: ({}, self.tmp)), \
+                mock.patch.object(L, "mem_available", lambda: 64 << 30), \
+                mock.patch.object(L.subprocess, "Popen", FakeProc), \
+                mock.patch.object(L.sys, "stderr", err):
+            with self.assertRaises(SystemExit) as cm:
+                L.main([*argv, "--work-dir", str(self.tmp / "w"), "--", "true"])
+        return cm.exception.code, err.getvalue()
+
+    def assert_slot_lock_free(self, name="emulator.lock"):
+        fd = os.open(str(self.tmp / "locks" / name), os.O_RDWR)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        finally:
+            os.close(fd)
+
+    def test_a_unit_that_systemd_run_could_not_start_is_not_classified(self):
+        # the slot's unit is still loaded (inactive) with an earlier invocation;
+        # systemd-run fails and the unit keeps that invocation
+        self.states = {EMU_UNIT: "inactive"}
+        self.props = {EMU_UNIT: {"LoadState": "loaded", "InvocationID": "old",
+                                 "Result": "oom-kill", "ExecMainStatus": "9"}}
+        with mock.patch.object(L, "classify", side_effect=AssertionError("classified")):
+            code, err = self._launch_mocked(lambda: None, 1)
+        self.assertEqual(code, 75, err)
+        self.assertIn("outcome=busy systemd-run (rc=1) did not start a new c55x-emu.service", err)
+        self.assertNotIn("oom", err)
+        self.assert_slot_lock_free()
+        # the same for a loaded unit that never ran (no invocation at all)
+        self.props = {EMU_UNIT: {"LoadState": "loaded"}}
+        with mock.patch.object(L, "classify", side_effect=AssertionError("classified")):
+            code, err = self._launch_mocked(lambda: None, 1)
+        self.assertEqual(code, 75, err)
+        self.assert_slot_lock_free()
+
+    def test_a_unit_that_was_started_is_classified(self):
+        self.states = {EMU_UNIT: "inactive"}
+        self.props = {EMU_UNIT: {"LoadState": "loaded", "InvocationID": "old"}}
+
+        def ran_and_failed():                       # a new invocation that exited 3
+            self.states[EMU_UNIT] = "failed"
+            self.props[EMU_UNIT] = {"LoadState": "loaded", "InvocationID": "new",
+                                    "Result": "exit-code", "ExecMainStatus": "3"}
+        code, err = self._launch_mocked(ran_and_failed, 3)
+        self.assertEqual(code, 3, err)
+        self.assertIn("outcome=payload rc=3", err)
+        self.assert_slot_lock_free()
+
+        def ran_and_was_collected():                # succeeded, unit already unloaded
+            self.states.pop(EMU_UNIT, None)
+            self.props.pop(EMU_UNIT, None)
+        code, err = self._launch_mocked(ran_and_was_collected, 0)
+        self.assertEqual(code, 0, err)
+        self.assert_slot_lock_free()
+
+    def test_status_is_read_only_and_lists_every_slot(self):
+        self.states = {EMU_UNIT: "active", "c55x-emu-3.service": "deactivating"}
+        out = io.StringIO()
+        with mock.patch.object(L, "user_bus_env", lambda: ({}, self.tmp)), \
+                mock.patch.object(L, "mem_available", lambda: 64 << 30), \
+                mock.patch.object(L.sys, "stdout", out):
+            self.assertEqual(L.main(["--status"]), 0)
+        self.assertEqual([c[0] for c in self.calls if c[0] != "show"], [])
+        lines = [l for l in out.getvalue().splitlines() if l.startswith("emulator slot")]
+        self.assertEqual(len(lines), 8)
+        self.assertIn("emulator slot 0: busy c55x-emu.service (active)", lines)
+        self.assertIn("emulator slot 1: free c55x-emu-1.service", lines)
+        self.assertIn("emulator slot 3: busy c55x-emu-3.service (deactivating)", lines)
+        self.assertIn("emulator slot 7: free c55x-emu-7.service", lines)
 
     def test_job_side_verification_execs_only_when_values_match(self):
         import resource

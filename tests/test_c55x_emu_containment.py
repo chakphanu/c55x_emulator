@@ -79,16 +79,16 @@ class InsideJob(unittest.TestCase):
         self.assertEqual(read(job, "pids.max"), "32")
         self.assertEqual(read(job, "memory.oom.group"), "1")
         self.assertEqual(read(job, "cpu.max"), "100000 100000")
-        self.assertEqual(read(slc, "memory.max"), str(10 * GIB))
-        self.assertEqual(read(slc, "memory.high"), str(9 * GIB))
+        self.assertEqual(read(slc, "memory.max"), str(18 * GIB))
+        self.assertEqual(read(slc, "memory.high"), str(17 * GIB))
         self.assertEqual(read(slc, "memory.swap.max"), "0")
-        self.assertEqual(read(slc, "pids.max"), "320")
+        self.assertEqual(read(slc, "pids.max"), "448")
         self.assertEqual(read(slc, "cpu.max"), "1000000 100000")
 
     def test_policy_is_revalidated_when_the_job_ceiling_is_relaxed(self):
         # A Core built under valid policy must stop executing once the group
         # is relaxed. The job cgroup is a bounded test group: the shared
-        # ancestor keeps its 10 GiB cap throughout, and the value is restored.
+        # ancestor keeps its 18 GiB cap throughout, and the value is restored.
         from tests.test_c55x_emu_long_words import machine
         cpu, _ = machine("AC0 = #1", "AC0 = AC0 << #1")
         cpu.step()                                   # valid policy: executes

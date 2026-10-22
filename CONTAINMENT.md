@@ -24,7 +24,7 @@ reference core (`ORACLE_V2.md`). To try a new core build without touching it:
 
 | Scope | Limit |
 | --- | --- |
-| Shared group `c55x.slice` (all launches) | memory.max 10 GiB, memory.high 9 GiB, swap 0, 320 tasks, 1000% CPU |
+| Shared group `c55x.slice` (all launches) | memory.max 18 GiB, memory.high 17 GiB, swap 0, 448 tasks, 1000% CPU |
 | One emulator job (slot unit `c55x-emu.service` or `c55x-emu-1.service` .. `c55x-emu-7.service`), descendants included | memory 1 GiB default / 2 GiB hard, swap 0, 32 tasks, 100% CPU, oom.group |
 | One job | 600 s CPU, 900 s wall, 5 s stop grace, 512 fds, no core dumps |
 | Admission | at most eight emulator jobs (one per slot); host MemAvailable >= 16 GiB; work dir not on tmpfs |
@@ -41,10 +41,14 @@ single-slot values (4 GiB, 3 GiB, 64 tasks, 200% CPU) and accepts only
    inside the job reads the real cgroup files and rlimits and execs the
    payload only if all match. Each of the eight emulator slots has a fixed
    unit name and its own lock (`emulator.lock`, `emulator-<k>.lock`): a launch
-   takes the first slot whose lock is free and whose unit is not running, and
-   exits 75 when there is none. A job orphaned by a dead launcher keeps its
-   limits, blocks only its own slot and still ends at its wall-time limit.
-   `--status` lists every slot.
+   takes the first slot whose lock is free and whose unit is inactive, failed
+   or not loaded (any other state, such as deactivating during the stop
+   grace, keeps the slot busy), and exits 75 when there is none. If
+   `systemd-run` still cannot start the slot's unit, the launch exits 75
+   without reporting the older unit's result. A job orphaned by a dead
+   launcher keeps its limits, blocks only its own slot and still ends at its
+   wall-time limit. `--status` lists every slot and changes nothing; the
+   shared-group properties are set by real launches only.
 2. `rust/c55x_core/src/policy.rs` (pyo3-free, unit tested with fake cgroup
    trees) is called when a `Core` is constructed and at execution entries. It
    resolves the cgroup2 mount from mountinfo, requires the process to be in

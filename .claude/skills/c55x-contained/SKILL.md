@@ -60,14 +60,15 @@ decision.
 - `emulator`: up to eight at a time for this user across all worktrees and
   shells, one per slot (units `c55x-emu.service`, `c55x-emu-1.service` ..
   `c55x-emu-7.service`). A launch takes the first free slot and gets exit 75
-  when all eight are busy. A job orphaned by a dead launcher keeps its limits
-  and its slot until it stops by itself at its wall-time limit; nothing is
-  killed to make room. Only this class can construct a `Core`.
+  when all eight are busy (a slot whose unit is still stopping counts as
+  busy). A job orphaned by a dead launcher keeps its limits and its slot
+  until it stops by itself at its wall-time limit; nothing is killed to make
+  room. Only this class can construct a `Core`.
 - `work`: for compilers and sanitizers; several can run at once. Virtual
   address space is 16 GiB (ASan shadow mappings); the physical ceiling is the
   same bounded `--mem`.
 
-All jobs share `c55x.slice`: 10 GiB memory (9 GiB high), no swap, 320 tasks,
+All jobs share `c55x.slice`: 18 GiB memory (17 GiB high), no swap, 448 tasks,
 1000 percent CPU. One job: no swap, at most 32 tasks, 100 percent CPU, 512 open
 files, no core dumps, 5 s stop grace. Admission needs 16 GiB MemAvailable on
 the host. Before the payload starts, a verifier inside the job reads the real

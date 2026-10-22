@@ -193,9 +193,12 @@ Guest behavior is unchanged: only the launcher and the containment guard
   `c55x-emu.service` and the lock `emulator.lock`; slot k = 1..7 uses
   `c55x-emu-<k>.service` and `emulator-<k>.lock`. The guard accepts exactly
   these eight unit names.
-- The shared group `c55x.slice` is raised to memory.max 10 GiB, memory.high
-  9 GiB, 320 tasks and 1000% CPU (swap stays 0). Per-job limits and admission
+- The shared group `c55x.slice` is raised to memory.max 18 GiB, memory.high
+  17 GiB, 448 tasks and 1000% CPU (swap stays 0). Per-job limits and admission
   are unchanged.
+- A slot whose unit is in any state other than inactive, failed or not loaded
+  (for example deactivating during the stop grace) is busy. `--status` no
+  longer sets the shared-group properties.
 - A core built before this change refuses to run under the raised shared
   limits and in slots 1..7; rebuild it.
 
