@@ -30,6 +30,51 @@ use pyo3::types::{PyBytes, PyDict};
 use crate::core::{peek_event, Core};
 use crate::err::Error;
 
+pyo3::create_exception!(
+    c55x_core, ResourcePolicyError, pyo3::exceptions::PyRuntimeError,
+    "Raised when the core is used outside the managed resource containment."
+);
+
+/// When the containment check last succeeded in this process.
+static LAST_OK: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+
+/// A relaxed policy or a moved process is detected on the first execution
+/// entry after this interval. The full check reads about 14 cgroup and /proc
+/// files (~120 us), which would make single-stepping 25x slower if repeated on
+/// every call; construction and the first entry after any failure always
+/// check in full.
+const REVALIDATE_EVERY: std::time::Duration = std::time::Duration::from_millis(50);
+
+fn last_ok() -> std::sync::MutexGuard<'static, Option<std::time::Instant>> {
+    LAST_OK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Full containment check (constructor, and the first entry after a failure).
+fn guard() -> PyResult<()> {
+    match crate::policy::check_containment() {
+        Ok(()) => {
+            *last_ok() = Some(std::time::Instant::now());
+            Ok(())
+        }
+        Err(e) => {
+            *last_ok() = None;
+            Err(ResourcePolicyError::new_err(e))
+        }
+    }
+}
+
+/// Containment check at an execution entry of an existing core.
+fn guard_entry() -> PyResult<()> {
+    if matches!(*last_ok(), Some(t) if t.elapsed() < REVALIDATE_EVERY) {
+        return Ok(());
+    }
+    guard()
+}
+
+/// Most pcs a trace may hold (4 Mi entries = 16 MiB): a resource cap, not
+/// architectural state.
+const MAX_TRACE_LEN: usize = 1 << 22;
+
 fn to_py(py: Python<'_>, e: Error) -> PyErr {
     match e {
         Error::Py(e) => e,
@@ -51,12 +96,10 @@ struct PyCore {
 impl PyCore {
     /// Load the state from the Python Cpu (it is authoritative between calls).
     fn enter<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-        // Re-validate resource containment on every execution entry.
-        // This detects a process that moved out of the cgroup or whose
-        // limits were relaxed after construction.
-        if let Err(e) = crate::policy::check_containment() {
-            return Err(to_py(py, e));
-        }
+        // Re-validate containment at execution entries (see REVALIDATE_EVERY):
+        // detects a process moved out of the cgroup or limits relaxed after
+        // construction.
+        guard_entry()?;
         let c = &mut self.core;
         let cpu = c.cpu.bind(py).clone();
         c.load(py, &cpu)?;
@@ -79,11 +122,8 @@ impl PyCore {
 impl PyCore {
     #[new]
     fn new(py: Python<'_>, cpu: &Bound<'_, PyAny>) -> PyResult<Self> {
-        // Check resource containment at construction. The core refuses to
-        // build outside the managed cgroup.
-        if let Err(e) = crate::policy::check_containment() {
-            return Err(to_py(py, e));
-        }
+        // The core refuses to be built outside the managed cgroup.
+        guard()?;
         Ok(PyCore { core: Core::new(py, cpu)? })
     }
 
@@ -157,8 +197,13 @@ impl PyCore {
     }
 
     /// Record the last max_len executed pcs (0 switches tracing off).
-    fn set_trace(&mut self, max_len: usize) {
+    fn set_trace(&mut self, max_len: usize) -> PyResult<()> {
+        if max_len > MAX_TRACE_LEN {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "trace length {} exceeds the maximum {}", max_len, MAX_TRACE_LEN)));
+        }
         self.core.trace = if max_len == 0 { None } else { Some((max_len, Default::default())) };
+        Ok(())
     }
 
     /// The recorded pcs, oldest first.
@@ -195,6 +240,7 @@ impl PyCore {
 
     /// Audio McBSP0 sent since the last call: [(sample rate, little-endian int16 L/R bytes)].
     fn take_audio<'py>(&mut self, py: Python<'py>) -> Vec<(f64, Bound<'py, PyBytes>)> {
+        self.core.audio_samples = 0;
         std::mem::take(&mut self.core.audio).into_iter()
             .map(|(rate, s)| {
                 let raw: Vec<u8> = s.iter().flat_map(|v| v.to_le_bytes()).collect();
@@ -207,6 +253,7 @@ impl PyCore {
 #[pymodule]
 fn c55x_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyCore>()?;
+    m.add("ResourcePolicyError", m.py().get_type::<ResourcePolicyError>())?;
     m.add("VERSION", env!("CARGO_PKG_VERSION"))?;
     Ok(())
 }

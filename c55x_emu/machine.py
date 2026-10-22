@@ -3,13 +3,13 @@
 import hashlib
 
 from .ata import Ata
-from .bus import Bus
+from .bus import MEM_BYTES, Bus
 from .diskimage import synthetic_disk
 from .clockgen import USBDPLL, ClockGen
 from .codec import ADDR as CODEC_ADDR
 from .codec import Codec
 from .cpu import Cpu
-from .decoder import CodeCache
+from .decoder import MAX_CACHED_INSNS, CodeCache
 from .i2c import I2c
 from .idlectl import IdleControl
 from .lcd import Lcd
@@ -22,6 +22,8 @@ from .rtc import Rtc
 from .timer import TIMERS, Timer
 
 MCU_IRQ = 16
+# All program sections together cannot exceed the 24-bit program address space.
+MAX_IMAGE_BYTES = MEM_BYTES
 
 
 class Machine:
@@ -32,10 +34,13 @@ class Machine:
         if not hasattr(program, "sections"):
             program = load_coff(program)
         self.program = program
+        self.image_info = self._image_info(program)
+        if self.image_info["total_bytes"] > MAX_IMAGE_BYTES:
+            raise ValueError(f"image {program.name}: {self.image_info['total_bytes']} bytes "
+                             f"exceeds the program address space ({MAX_IMAGE_BYTES})")
         self.bus = Bus()
         for addr, data in program.sections:
             self.bus.load(addr, data)
-        self.image_info = self._image_info(program)
         self.lcd = Lcd(self.bus)
         self.code = CodeCache(self.bus, program.insns)
         self.cpu = Cpu(self.bus, self.code, program.symbols)
@@ -74,8 +79,12 @@ class Machine:
         return {"name": program.name, "total_bytes": total,
                 "section_count": len(program.sections),
                 "sha256": h.hexdigest(),
-                "sections": sections,
-                "bus_load_log": self.bus.load_log}
+                "sections": sections}
+
+    def resource_report(self):
+        """The loaded image plus live sizes of the growable emulator structures."""
+        return dict(self.image_info, code_cache_insns=len(self.code.insns),
+                    code_cache_max=MAX_CACHED_INSNS)
 
     def run(self, max_steps, stop=frozenset(), until_seconds=None):
         """-> True when the CPU reached an idle loop (cpu.run; stop: pcs to halt at;

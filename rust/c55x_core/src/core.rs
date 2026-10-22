@@ -64,6 +64,7 @@ pub struct Core {
     pub flushing: bool,
     pub timers: BinaryHeap<Reverse<(u64, usize, u32)>>, // (cycle, McBSP, generation)
     pub audio: Vec<(f64, Vec<i16>)>,                    // (sample rate, interleaved L/R)
+    pub audio_samples: usize,                           // samples buffered in audio (cap: MAX_AUDIO_SAMPLES)
     pub ata: Option<Box<Ata>>,                          // attached by ata.py
 }
 
@@ -95,7 +96,7 @@ impl Core {
             cache: ICache::new(), next_event: u64::MAX,
             irq_counts: [0; 32], native: 0, compiles: 0, py_writes: 0, py_calls: 0, trace: None, odd_longs: None, bios_idle: None,
             poll_loops: PcFilter::default(), dma: Dma::default(), mcbsp: Default::default(),
-            pending_sync: VecDeque::new(), flushing: false, timers: BinaryHeap::new(), audio: Vec::new(), ata: None,
+            pending_sync: VecDeque::new(), flushing: false, timers: BinaryHeap::new(), audio: Vec::new(), audio_samples: 0, ata: None,
         })
     }
 

@@ -5,111 +5,108 @@ description: Use BEFORE running anything that loads the C55x emulator core (pyth
 
 # Running the emulator under resource containment
 
-STATUS: interface contract. The launcher and the native guard are being
-implemented against this text; until this line is removed, treat the exact
-flags and exit codes as the target, not as verified behavior.
+Full reference: `CONTAINMENT.md`. This page is the short operational version.
 
 ## The one rule
 
-Run every emulator payload, test run, probe and build through
+Run every emulator payload, test run, probe and heavy build through
 `bin/c55x-contained`. Never run them directly.
 
-The native core (`c55x_core`) checks its own cgroup and process limits when a
-`Core` is constructed and on every execution entry (`run`, `step`, `call`,
-`ret`, `advance`, `ata_io`). Outside the managed cgroup it raises
-`ResourcePolicyError`. There is no flag or environment variable to skip
-this check, so do not look for one.
+The native core (`c55x_core`) checks the cgroup hierarchy and process limits
+when a `Core` is constructed and again at execution entries (`run`, `step`,
+`call`, `ret`, `advance`, `ata_io`). Outside the managed cgroup it raises
+`c55x_core.ResourcePolicyError`. There is no flag or environment variable to
+skip the check, so do not look for one.
 
 ## Commands
-
-Emulator payloads (CLI, unit tests, probes, Python scripts that use the core):
 
     bin/c55x-contained -- python3 -m unittest discover -s tests -t .
     bin/c55x-contained -- python3 -m c55x_emu ARGS...
     bin/c55x-contained -- python3 my_probe.py --flag "literal arg"
 
-Builds and other heavy non-emulator work (compilers, sanitizer runs, large
-exports or decompression):
+Compilers, sanitizer runs and other heavy non-emulator work (cannot build a
+`Core`; may run next to an emulator job):
 
     bin/c55x-contained --job work -- ./rust/build.sh
     bin/c55x-contained --job work --mem 2G -- cargo test
 
-Status of the current emulator admission (read only):
+Read-only status of the emulator slot and host headroom:
 
     bin/c55x-contained --status
 
-Arguments after `--` are passed literally (no shell re-parsing). The working
-directory, stdin, stdout and stderr are the caller's. Exit status follows the
-table below.
+Arguments after `--` are passed literally (no shell re-parsing). Working
+directory, stdin, stdout, stderr and the exit status are preserved. The job
+sees `PATH`, `HOME`, `PYTHONPATH`, `LC_*`, `ZEN_*`, `C55X_*` and a few
+toolchain variables; add others by name with `--env NAME` (the value never
+appears on a command line). Numeric-library thread counts are forced to 1.
 
 ## Options
 
 | Option | Default | Hard limit | Meaning |
 | --- | --- | --- | --- |
-| `--job emulator\|work` | `emulator` | - | Job class (see below) |
-| `--mem SIZE` | `1G` | `2G` | Memory ceiling for the whole job, all descendants |
-| `--cpu-sec N` | `600` | `600` | CPU seconds per process (RLIMIT_CPU) |
-| `--wall-sec N` | `900` | `900` | Wall-clock lifetime of the job |
-| `--work-dir DIR` | `build/work` | - | TMPDIR and cache location; must not be tmpfs |
+| `--job emulator\|work` | `emulator` | - | Job class |
+| `--mem SIZE` | `1G` | `2G` | Memory ceiling of the whole job tree |
+| `--cpu-sec N` | `600` | `600` | CPU seconds (RLIMIT_CPU) |
+| `--wall-sec N` | `900` | `900` | Lifetime of the job |
+| `--work-dir DIR` | `<repo>/build/work` | - | TMPDIR for the job; must be disk-backed |
+| `--env NAME` | - | - | Forward one more environment variable (repeatable) |
 
-Requests above a hard limit are refused with the policy exit code. Limits
-are never raised automatically after a failure; asking for more after a
-failure is a decision for the owner, not for a retry loop.
+A request above a hard limit is refused (exit 77), never clamped. Limits are
+never raised automatically after a failure; a larger allowance is the owner's
+decision.
 
 ## Job classes
 
-- `emulator`: at most one at a time for this user, across all worktrees and
-  shells. A second launch while one is admitted gets the busy exit code.
-  Only this class can construct a `Core`.
-- `work`: for compilers and sanitizers. Several may run at once. Gets a
-  large but finite virtual address-space limit for ASan shadow memory; its
-  physical memory ceiling is the same as for the emulator class.
+- `emulator`: one at a time for this user across all worktrees and shells. A
+  second launch gets exit 75, including when the running job was orphaned by a
+  dead launcher (it keeps its limits and stops by itself at its wall-time
+  limit; nothing is killed to make room). Only this class can construct a
+  `Core`.
+- `work`: for compilers and sanitizers; several can run at once. Virtual
+  address space is 16 GiB (ASan shadow mappings); the physical ceiling is the
+  same bounded `--mem`.
 
-All jobs share one parent slice that caps the total: 4 GiB memory (3 GiB
-high-water), zero swap, 64 tasks, 200 percent CPU. Each job: zero swap, at
-most 32 tasks, 100 percent CPU, at most 512 open files, no core dumps,
-5 second stop grace. A job is admitted only when the host reports at least
-16 GiB MemAvailable.
+All jobs share `c55x.slice`: 4 GiB memory (3 GiB high), no swap, 64 tasks,
+200 percent CPU. One job: no swap, at most 32 tasks, 100 percent CPU, 512 open
+files, no core dumps, 5 s stop grace. Admission needs 16 GiB MemAvailable on
+the host. Before the payload starts, a verifier inside the job reads the real
+cgroup files and rlimits and refuses to continue if any differs.
 
-## Exit codes and what to do
+## Exit codes
 
 | Code | Outcome | What to do |
 | --- | --- | --- |
 | 0 | Payload succeeded | - |
-| 1-63 | Payload's own non-zero exit (semantic failure) | Read the payload's output |
-| 70 | Payload result incomplete or its exit code collides with a reserved code | Treat as failure; see stderr |
-| 74 | Admission refused: host memory headroom below 16 GiB | Wait; do not free memory by killing other programs |
-| 75 | Admission refused: another emulator job is running | Wait for it to finish; never kill or clear it |
-| 77 | Policy refused (cgroup, limits, user manager or work dir not verifiable) | Fix the reported cause; do not bypass |
-| 79 | Job hit its memory ceiling and was killed (local cgroup OOM) | Reduce the workload; do not raise --mem on your own |
-| 124 | Wall or CPU time limit reached | Split the work; do not raise limits on your own |
+| any other non-zero | The payload's own exit status (reserved codes below are remapped to 70) | Read its output |
+| 70 | Incomplete result, or the payload exited with a reserved code | Treat as failure; read stderr |
+| 74 | Host headroom below 16 GiB | Wait; do not free memory by killing other programs |
+| 75 | Emulator slot busy | Wait for it; never kill or clear it |
+| 77 | Policy refused (limits, work dir, user manager, verification) | Fix the reported cause; do not bypass |
+| 79 | Local cgroup OOM: the job hit its memory ceiling | Reduce the workload; do not raise `--mem` yourself |
+| 124 | Wall-time or CPU-time limit | Split the work; do not raise limits yourself |
 | 128+N | Payload killed by signal N | Investigate |
 
-A killed or incomplete run is never reported as success. On every non-zero
-outcome the launcher prints one line on stderr starting with
-`c55x-contained: outcome=`.
+A killed or incomplete run is never reported as success. Every non-zero
+outcome prints one line on stderr starting with `c55x-contained: outcome=`.
 
 ## Do not
 
-- Import `c55x_emu` or `c55x_core`, or run `python3 -m unittest`, outside the
-  launcher.
-- Edit cgroup files, the `c55x.slice` properties or the job unit by hand, or
-  move processes between cgroups.
+- Import `c55x_emu` / `c55x_core` or run the tests outside the launcher.
+- Edit cgroup files, the `c55x.slice` properties or the job unit, or move
+  processes between cgroups.
 - Stop, kill or `reset-failed` another job's unit, or delete its lock.
 - Point `--work-dir`, `TMPDIR` or build outputs at `/tmp`, `/dev/shm` or any
   other tmpfs.
 - Replace the pinned core `build/py/c55x_core.so`. A new core build goes to
-  its own output directory, and moving downstream pins to it needs explicit
-  owner confirmation.
+  its own output directory (`CARGO_TARGET_DIR=build/candidate-rust cargo
+  build --release ...`, then use it with `ZEN_CORE_DIR=<dir>`). Moving
+  downstream pins to a new core needs explicit owner confirmation.
 
-## Trust boundary
+## Trust boundary and limits
 
 This protects against forgotten instructions and accidental direct calls. It
-is not a security boundary against a process that deliberately alters its
-own cgroup or uses an old binary under the same user ID.
-
-## Platform
-
+is not a security boundary: a process of the same user can edit its own
+delegated cgroup files or run an old binary. A relaxed policy or a moved
+process is noticed at the first execution entry after at most 50 ms.
 Requires Linux with cgroup v2 and a systemd user manager that delegates the
-memory, pids and cpu controllers. On other platforms the launcher refuses to
-run (policy exit code); equivalent protection is not claimed.
+memory, pids and cpu controllers; elsewhere the launcher and the core refuse.

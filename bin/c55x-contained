@@ -1,434 +1,505 @@
 #!/usr/bin/env python3
-"""c55x-contained: the only supported way to run the emulator core.
+"""c55x-contained: the supported way to run the emulator core and heavy work.
 
-Places a payload in a systemd user-slice with cgroup v2 limits (memory,
-swap, tasks, CPU, wall time), verifies the kernel-enforced values before
-starting, admits at most one emulator job at a time across all worktrees,
-and reports distinct outcomes for policy failure, busy admission, low host
-memory headroom, timeout, local OOM, and payload failure.
+Runs a payload as a systemd user service inside the shared slice c55x.slice
+(cgroup v2), reads the limits back from the kernel inside the job before the
+payload starts, admits at most one emulator job at a time, and reports a
+distinct outcome for each failure class. There is no fallback: if containment
+cannot be verified the payload does not run.
 
-Exit codes:
-  0        payload exited 0
-  1-63     payload's own non-zero exit status
-  70       payload result incomplete / exit code collides with a reserved code
-  74       host memory headroom below the admission threshold (16 GiB)
-  75       another emulator job is running (busy)
-  77       policy refused (cgroup, limits, user manager or work dir not verifiable)
-  79       job hit its memory ceiling (local cgroup OOM kill)
-  124      wall-clock or CPU time limit reached
-  128+N    payload killed by signal N
+Usage:
+  c55x-contained [--job emulator|work] [--mem SIZE] [--cpu-sec N]
+                 [--wall-sec N] [--work-dir DIR] [--env NAME]... -- CMD [ARG...]
+  c55x-contained --status
 
-Usage: c55x-contained [--job emulator|work] [--mem SIZE] [--cpu-sec N]
-                      [--wall-sec N] [--work-dir DIR] [--status] -- CMD...
+Exit codes (see .claude/skills/c55x-contained/SKILL.md):
+  0 ok | 1-63 payload's own status | 70 incomplete or reserved-code collision
+  74 host headroom low | 75 busy | 77 policy refused | 79 local cgroup OOM
+  124 wall or CPU time limit | 128+N payload killed by signal N
+Code 78 is internal (job-side verification failed) and never returned.
 """
 
 import argparse
 import errno
 import fcntl
-import json
-import math
 import os
-import re
-import shutil
-import stat
+import signal
 import subprocess
 import sys
 import time
+import uuid
 from pathlib import Path
 
+REPO_ROOT = Path(__file__).resolve().parent.parent
 SLICE = "c55x.slice"
 EMU_UNIT = "c55x-emu.service"
 LOCK_DIR = Path("/run/user") / str(os.getuid()) / "c55x-contained"
 
-# hard ceilings: a request above these is refused, not clamped
-MAX_MEM_BYTES = 2 * 1024**3
+GIB = 1024 ** 3
+MAX_MEM_BYTES = 2 * GIB          # hard ceiling for one job
 MAX_CPU_SEC = 600
 MAX_WALL_SEC = 900
-MIN_HEADROOM_BYTES = 16 * 1024**3
-# shared slice: all jobs combined
-SLICE_MEM_MAX = 4 * 1024**3
-SLICE_MEM_HIGH = 3 * 1024**3
+MIN_HEADROOM_BYTES = 16 * GIB    # host MemAvailable needed to admit a job
+SLICE_MEM_MAX = 4 * GIB
+SLICE_MEM_HIGH = 3 * GIB
 SLICE_TASKS = 64
-SLICE_CPU_PCT = 200
-# per job (non-overridable)
+SLICE_CPU_QUOTA = (200000, 100000)
 JOB_TASKS = 32
-JOB_CPU_PCT = 100
+JOB_CPU_QUOTA = (100000, 100000)
 JOB_FDS = 512
 JOB_STOP_SEC = 5
+AS_EMULATOR = 8 * GIB            # RLIMIT_AS (virtual); physical use stays bounded by the cgroup
+AS_WORK = 16 * GIB
 
-RC_OK = 0
-RC_INCOMPLETE = 70
-RC_HEADROOM = 74
-RC_BUSY = 75
-RC_POLICY = 77
-RC_OOM = 79
-RC_TIMEOUT = 124
+RC_INCOMPLETE, RC_HEADROOM, RC_BUSY, RC_POLICY = 70, 74, 75, 77
+RC_INNER_POLICY, RC_OOM, RC_TIMEOUT = 78, 79, 124
+RESERVED = {RC_INCOMPLETE, RC_HEADROOM, RC_BUSY, RC_POLICY, RC_INNER_POLICY,
+            RC_OOM, RC_TIMEOUT}
 
-UNIT_OOM = "oom-kill"
-UNIT_TIMEOUT = "timeout"
-UNIT_SIGNAL = "signal"
+# Variable NAMES forwarded to the job (values come from this process's
+# environment via `--setenv=NAME`, so no value appears in any argv).
+FORWARD_EXACT = {"PATH", "HOME", "USER", "LOGNAME", "LANG", "LANGUAGE", "TERM",
+                 "PYTHONPATH", "PYTHONHASHSEED", "PYTHONDONTWRITEBYTECODE",
+                 "VIRTUAL_ENV", "CARGO_HOME", "RUSTUP_HOME", "CARGO_TARGET_DIR",
+                 "RUSTFLAGS", "CC", "CXX", "CFLAGS", "CXXFLAGS", "LDFLAGS",
+                 "ASAN_OPTIONS", "UBSAN_OPTIONS"}
+FORWARD_PREFIX = ("LC_", "ZEN_", "C55X_")
+NEVER_FORWARD = {"C55X_CONTAINED_JOB", "TMPDIR", "XDG_RUNTIME_DIR",
+                 "DBUS_SESSION_BUS_ADDRESS"}
+THREAD_VARS = ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
+               "NUMEXPR_NUM_THREADS", "VECLIB_MAXIMUM_THREADS",
+               "RAYON_NUM_THREADS")
 
 
 def eprint(msg):
-    sys.stderr.write(f"c55x-contained: {msg}\n")
+    sys.stderr.write("c55x-contained: %s\n" % msg)
 
 
 def die(rc, outcome, msg):
-    eprint(f"outcome={outcome} {msg}")
+    eprint("outcome=%s %s" % (outcome, msg))
     sys.exit(rc)
 
 
-def parse_size(s):
-    s = s.strip().upper()
-    for suf, mult in (("G", 1024**3), ("M", 1024**2), ("K", 1024), ("", 1)):
-        if s.endswith(suf) and s[: -len(suf) or None].isdigit():
-            return int(s[: -len(suf) or None]) * mult
-    if s.isdigit():
-        return int(s)
-    raise ValueError(f"bad size {s!r}")
+def parse_size(text):
+    t = text.strip().upper()
+    mult = {"G": GIB, "M": 1024 ** 2, "K": 1024}.get(t[-1:], None)
+    digits = t[:-1] if mult else t
+    if not digits.isdigit():
+        raise ValueError("bad size %r" % text)
+    return int(digits) * (mult or 1)
 
 
-# ---------------------------------------------------------------- discovery
-
+# ------------------------------------------------------------ user manager
 
 def user_bus_env():
-    """Return (env, runtime_dir) for the user manager, or None."""
+    """(env, runtime_dir) for the caller's user manager, or None. The
+    runtime directory must be a directory owned by this user and its bus a
+    socket; nothing is taken from ambient variables without that check."""
     uid = os.getuid()
-    for rt in (os.environ.get("XDG_RUNTIME_DIR"), f"/run/user/{uid}"):
-        if not rt:
+    seen = []
+    for rt in (os.environ.get("XDG_RUNTIME_DIR"), "/run/user/%d" % uid):
+        if not rt or rt in seen:
             continue
-        rt = Path(rt)
-        bus = rt / "bus"
-        if not bus.is_socket():
-            continue
+        seen.append(rt)
+        p = Path(rt)
         try:
-            if rt.stat().st_uid != uid:
+            st = p.stat()
+            if not p.is_dir() or st.st_uid != uid:
+                continue
+            bus = p / "bus"
+            if not bus.is_socket() or bus.stat().st_uid != uid:
                 continue
         except OSError:
             continue
         env = dict(os.environ)
-        env["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path={bus}"
-        env["XDG_RUNTIME_DIR"] = str(rt)
-        return env, rt
+        env["XDG_RUNTIME_DIR"] = str(p)
+        env["DBUS_SESSION_BUS_ADDRESS"] = "unix:path=%s" % bus
+        return env, p
     return None
 
 
-def systemctl(env, *args, check=True):
-    cmd = ["systemctl", "--user", *args]
-    r = subprocess.run(cmd, env=env, capture_output=True, text=True)
-    if check and r.returncode != 0:
-        raise RuntimeError(
-            f"{' '.join(cmd)} rc={r.returncode} {r.stderr.strip()[:200]}")
-    return r
+def systemctl(env, *args):
+    return subprocess.run(["systemctl", "--user", *args], env=env,
+                          capture_output=True, text=True)
 
 
-def verify_slice(env):
-    """Create the shared slice limits and read back the kernel values."""
-    systemctl(env, "set-property", "--runtime", SLICE,
-              f"MemoryMax={SLICE_MEM_MAX}",
-              f"MemoryHigh={SLICE_MEM_HIGH}",
-              "MemorySwapMax=0",
-              f"TasksMax={SLICE_TASKS}",
-              f"CPUQuota={SLICE_CPU_PCT}%")
-    out = systemctl(env, "show", SLICE,
-                    "-p", "LoadState", "-p", "ActiveState",
-                    "-p", "MemoryMax", "-p", "MemorySwapMax",
-                    "-p", "TasksMax", "-p", "CPUQuotaPerSecUSec").stdout
-    v = {}
-    for line in out.strip().splitlines():
-        if "=" in line:
-            k, val = line.split("=", 1)
-            v[k] = val
-    if v.get("LoadState") != "loaded":
-        return None, f"slice {SLICE} LoadState={v.get('LoadState')}"
-    if v.get("MemoryMax") != str(SLICE_MEM_MAX):
-        return None, f"slice MemoryMax={v.get('MemoryMax')} != {SLICE_MEM_MAX}"
-    if v.get("MemorySwapMax") != "0":
-        return None, f"slice MemorySwapMax={v.get('MemorySwapMax')} != 0"
-    if v.get("TasksMax") not in (str(SLICE_TASKS), str(SLICE_TASKS)):
-        return None, f"slice TasksMax={v.get('TasksMax')} != {SLICE_TASKS}"
-    return v, None
+def unit_props(env, unit, *names):
+    out = systemctl(env, "show", unit, *sum((["-p", n] for n in names), [])).stdout
+    props = {}
+    for line in out.splitlines():
+        k, _, v = line.partition("=")
+        props[k] = v
+    return props
 
+
+def set_slice_limits(env):
+    r = systemctl(env, "set-property", "--runtime", SLICE,
+                  "MemoryMax=%d" % SLICE_MEM_MAX, "MemoryHigh=%d" % SLICE_MEM_HIGH,
+                  "MemorySwapMax=0", "TasksMax=%d" % SLICE_TASKS,
+                  "CPUQuota=%d%%" % (SLICE_CPU_QUOTA[0] // 1000))
+    if r.returncode != 0:
+        die(RC_POLICY, "policy", "cannot configure %s: %s" % (SLICE, r.stderr.strip()[:200]))
+
+
+# ------------------------------------------------------------ host checks
 
 def mem_available():
     with open("/proc/meminfo") as f:
         for line in f:
             if line.startswith("MemAvailable:"):
-                return int(line.split()[1]) * 1024
-    return 0
+                real = int(line.split()[1]) * 1024
+                break
+        else:
+            return 0
+    # Test hook: a LOWER value can be injected (never a higher one), so it
+    # can only make admission stricter.
+    inj = os.environ.get("C55X_TEST_MEM_AVAILABLE_BYTES", "")
+    if inj.isdigit():
+        real = min(real, int(inj))
+    return real
 
 
-def is_tmpfs(path):
-    """True if the resolved path is on a tmpfs mount."""
+def on_tmpfs(path):
+    """True if the resolved path lies on a tmpfs or ramfs mount."""
     p = Path(path).resolve()
+    best = None
     try:
         with open("/proc/self/mountinfo") as f:
             for line in f:
-                # format: id parent major:minor root mountpoint opts ... - fstype src ...
-                if " - " not in line:
+                left, sep, right = line.partition(" - ")
+                if not sep:
                     continue
-                left, right = line.split(" - ", 1)
-                left_parts = left.split()
-                fstype = right.split()[0] if right.strip() else ""
-                mp = left_parts[4] if len(left_parts) > 4 else ""
-                if "tmpfs" in fstype and mp:
-                    try:
-                        if p.is_relative_to(Path(mp)):
-                            return True
-                    except (ValueError, OSError):
-                        pass
+                fields = left.split()
+                fstype = right.split()[0] if right.split() else ""
+                if len(fields) < 5:
+                    continue
+                mp = Path(fields[4].replace("\\040", " "))
+                try:
+                    p.relative_to(mp)
+                except ValueError:
+                    continue
+                if best is None or len(str(mp)) >= len(str(best[0])):
+                    best = (mp, fstype)
     except OSError:
-        pass
-    return False
+        return True            # cannot verify: treat as unsafe
+    return best is None or best[1] in ("tmpfs", "ramfs", "devtmpfs")
 
 
-# ---------------------------------------------------------------- admission
-
+# ------------------------------------------------------------ admission
 
 class Admission:
-    """Owner-checked lock for the single emulator job slot."""
+    """Per-user single emulator slot: an advisory lock (owner pid recorded)
+    plus the fixed unit name, so a job orphaned by a dead launcher still
+    blocks a replacement until it ends."""
 
     def __init__(self):
         self.fd = None
-        self.path = None
 
     def acquire(self):
-        LOCK_DIR.mkdir(parents=True, exist_ok=True)
-        self.path = LOCK_DIR / "emulator.lock"
-        self.fd = os.open(self.path, os.O_CREAT | os.O_RDWR, 0o600)
+        LOCK_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
+        self.fd = os.open(str(LOCK_DIR / "emulator.lock"), os.O_CREAT | os.O_RDWR, 0o600)
         try:
             fcntl.flock(self.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError as e:
+            os.close(self.fd)
+            self.fd = None
             if e.errno in (errno.EWOULDBLOCK, errno.EAGAIN):
                 return False
             raise
         os.ftruncate(self.fd, 0)
-        os.write(self.fd, f"{os.getpid()}\n".encode())
+        os.write(self.fd, b"%d\n" % os.getpid())
         return True
 
     def release(self):
         if self.fd is not None:
-            try:
-                fcntl.flock(self.fd, fcntl.LOCK_UN)
-            except OSError:
-                pass
-            os.close(self.fd)
+            os.close(self.fd)          # closing drops the flock
             self.fd = None
 
 
-def kill_stale_unit(env):
-    """Ensure no leftover emulator unit from a previous launcher crash."""
-    r = systemctl(env, "is-active", "--quiet", EMU_UNIT, check=False)
-    if r.returncode == 0:
-        systemctl(env, "stop", EMU_UNIT, check=False)
-        # wait up to the stop grace for it to disappear
-        for _ in range(JOB_STOP_SEC * 2):
-            r = systemctl(env, "is-active", "--quiet", EMU_UNIT, check=False)
-            if r.returncode != 0:
-                break
-            time.sleep(0.5)
-        r = systemctl(env, "is-active", "--quiet", EMU_UNIT, check=False)
-        if r.returncode == 0:
-            return False, f"{EMU_UNIT} still active after stop"
-    systemctl(env, "reset-failed", EMU_UNIT, check=False)
-    return True, None
+# ------------------------------------------------------------ job-side verify
+
+def cgroup2_dir():
+    """Directory of this process's cgroup, mapped through the real cgroup2
+    mount (mountinfo), or None."""
+    rel = None
+    for line in Path("/proc/self/cgroup").read_text().splitlines():
+        if line.startswith("0::"):
+            rel = line[3:].strip()
+    if not rel:
+        return None
+    for line in Path("/proc/self/mountinfo").read_text().splitlines():
+        left, sep, right = line.partition(" - ")
+        if sep and right.split()[:1] == ["cgroup2"]:
+            f = left.split()
+            root, mnt = f[3], f[4]
+            try:
+                under = Path(rel).relative_to(root)
+            except ValueError:
+                return None
+            if ".." in under.parts:
+                return None
+            return Path(mnt) / under
+    return None
 
 
-# ---------------------------------------------------------------- run
+def read_value(d, name):
+    return (d / name).read_text().strip()
 
 
-def do_status(env):
-    v, err = verify_slice(env)
-    if err:
-        die(RC_POLICY, "policy", err)
-    avail = mem_available()
-    r = systemctl(env, "is-active", "--quiet", EMU_UNIT, check=False)
-    busy = r.returncode == 0
-    print(f"slice: {SLICE} OK (mem={SLICE_MEM_MAX}, swap=0, "
-          f"tasks={SLICE_TASKS}, cpu={SLICE_CPU_PCT}%)")
-    print(f"emulator slot: {'busy' if busy else 'free'}")
-    print(f"host MemAvailable: {avail / 1024**3:.1f} GiB "
-          f"(need {MIN_HEADROOM_BYTES // 1024**3} GiB)")
-    adm = "ok" if avail >= MIN_HEADROOM_BYTES else "low"
-    print(f"admission: {adm}")
-    sys.exit(0)
+def inner_verify(args):
+    """Runs INSIDE the job before the payload: compare kernel readbacks with
+    the exact expected values, then exec the payload. Exit 78 on mismatch."""
+    def fail(msg):
+        eprint("outcome=policy job-side verification failed: %s" % msg)
+        try:                     # lets the launcher tell this apart from a payload exit 78
+            LOCK_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
+            (LOCK_DIR / (args.unit + ".verify-failed")).write_text("1\n")
+        except OSError:
+            pass
+        sys.exit(RC_INNER_POLICY)
+
+    d = cgroup2_dir()
+    if d is None:
+        fail("cannot resolve the cgroup2 membership")
+    # the job directory is the one named after our unit, directly below the slice
+    job = None
+    for cand in [d, *d.parents]:
+        if cand.name == args.unit and cand.parent.name == SLICE:
+            job = cand
+            break
+    if job is None:
+        fail("process is not in %s/%s" % (SLICE, args.unit))
+    slc = job.parent
+    try:
+        want_job = {
+            "memory.max": str(args.mem_bytes), "memory.swap.max": "0",
+            "pids.max": str(JOB_TASKS), "memory.oom.group": "1",
+            "cpu.max": "%d %d" % JOB_CPU_QUOTA,
+        }
+        want_slice = {
+            "memory.max": str(SLICE_MEM_MAX), "memory.high": str(SLICE_MEM_HIGH),
+            "memory.swap.max": "0", "pids.max": str(SLICE_TASKS),
+            "cpu.max": "%d %d" % SLICE_CPU_QUOTA,
+        }
+        for where, want in ((job, want_job), (slc, want_slice)):
+            for name, expect in want.items():
+                got = read_value(where, name)
+                if got != expect:
+                    fail("%s/%s = %r, expected %r" % (where.name, name, got, expect))
+    except OSError as e:
+        fail("controller file unreadable: %s" % e)
+    import resource
+    for res, want, label in ((resource.RLIMIT_CPU, args.cpu_sec, "RLIMIT_CPU"),
+                             (resource.RLIMIT_NOFILE, JOB_FDS, "RLIMIT_NOFILE"),
+                             (resource.RLIMIT_CORE, 0, "RLIMIT_CORE"),
+                             (resource.RLIMIT_AS, args.as_bytes, "RLIMIT_AS")):
+        if resource.getrlimit(res) != (want, want):
+            fail("%s = %r, expected %r" % (label, resource.getrlimit(res), (want, want)))
+    os.execvp(args.cmd[0], args.cmd)
+
+
+# ------------------------------------------------------------ outer launcher
+
+def forwarded_names(extra=()):
+    names = [n for n in extra if n in os.environ and n not in NEVER_FORWARD]
+    for n in os.environ:
+        if n in NEVER_FORWARD:
+            continue
+        if n in FORWARD_EXACT or n.startswith(FORWARD_PREFIX):
+            names.append(n)
+    return sorted(names)
+
+
+def classify(env, unit, rc, cpu_sec):
+    """Map the finished unit to (exit code, outcome, message)."""
+    p = unit_props(env, unit, "LoadState", "Result", "ExecMainStatus", "CPUUsageNSec")
+    result, load = p.get("Result", ""), p.get("LoadState", "")
+    try:
+        status = int(p.get("ExecMainStatus", "0") or 0)
+    except ValueError:
+        status = 0
+    try:
+        cpu_ns = int(p.get("CPUUsageNSec", "0") or 0)
+    except ValueError:
+        cpu_ns = 0
+    systemctl(env, "reset-failed", unit)           # exactly this unit only
+    marker = LOCK_DIR / (unit + ".verify-failed")
+    verify_failed = marker.exists()
+    if verify_failed:
+        marker.unlink()
+    if load == "not-found":
+        if rc == 0:
+            return 0, "payload", "rc=0"
+        return RC_POLICY, "policy", "the job could not be started (systemd-run rc=%d)" % rc
+    if result == "oom-kill":
+        return RC_OOM, "oom", "the job reached its memory ceiling and was killed"
+    if result == "timeout":
+        return RC_TIMEOUT, "timeout", "the job reached its wall-time limit"
+    if result in ("signal", "core-dump"):
+        if status == 24 or (status == 9 and cpu_ns >= 0.95e9 * cpu_sec):
+            return RC_TIMEOUT, "timeout", "the job reached its CPU-time limit (%ds)" % cpu_sec
+        return 128 + status, "signal", "the job was killed by signal %d" % status
+    if result in ("success", "exit-code"):
+        if rc == RC_INNER_POLICY and verify_failed:
+            return RC_POLICY, "policy", "job-side containment verification failed (see above)"
+        if rc in RESERVED:
+            return RC_INCOMPLETE, "incomplete", \
+                "the payload exited with reserved code %d" % rc
+        return rc, "payload", "rc=%d" % rc
+    return RC_INCOMPLETE, "incomplete", "unit ended with Result=%s" % (result or "unknown")
 
 
 def run_job(args):
-    env_bus = user_bus_env()
-    if env_bus is None:
-        die(RC_POLICY, "policy", "no user manager bus socket found")
-    env, rt = env_bus
+    bus = user_bus_env()
+    if bus is None:
+        die(RC_POLICY, "policy", "no usable user manager (owned runtime dir and bus socket)")
+    env, _ = bus
 
     if args.status:
-        do_status(env)
+        return do_status(env)
 
-    # verify and set the shared slice
-    _, err = verify_slice(env)
-    if err:
-        die(RC_POLICY, "policy", f"shared slice: {err}")
-
-    # headroom
-    avail = mem_available()
-    if avail < MIN_HEADROOM_BYTES:
-        die(RC_HEADROOM, "headroom",
-            f"MemAvailable {avail // 1024**3} GiB < "
-            f"{MIN_HEADROOM_BYTES // 1024**3} GiB")
-
-    # work dir
+    mem = parse_mem(args)
+    if args.cpu_sec < 1 or args.cpu_sec > MAX_CPU_SEC:
+        die(RC_POLICY, "policy", "--cpu-sec must be 1..%d" % MAX_CPU_SEC)
+    if args.wall_sec < 1 or args.wall_sec > MAX_WALL_SEC:
+        die(RC_POLICY, "policy", "--wall-sec must be 1..%d" % MAX_WALL_SEC)
+    if not args.cmd:
+        die(RC_POLICY, "policy", "no command after --")
     work_dir = Path(args.work_dir).resolve()
-    if is_tmpfs(work_dir):
-        die(RC_POLICY, "policy",
-            f"work dir {work_dir} is on tmpfs; use a disk-backed directory")
+    probe = work_dir                       # nearest existing ancestor decides the
+    while not probe.exists() and probe != probe.parent:     # filesystem; check
+        probe = probe.parent                                # BEFORE creating anything
+    if on_tmpfs(probe):
+        die(RC_POLICY, "policy", "work dir %s is on tmpfs or cannot be verified; "
+            "use a disk-backed directory" % work_dir)
     work_dir.mkdir(parents=True, exist_ok=True)
 
-    # admission
+    avail = mem_available()
+    if avail < MIN_HEADROOM_BYTES:
+        die(RC_HEADROOM, "headroom", "MemAvailable %.1f GiB < %d GiB" %
+            (avail / GIB, MIN_HEADROOM_BYTES // GIB))
+
+    adm = None
     if args.job == "emulator":
+        unit = EMU_UNIT
         adm = Admission()
         if not adm.acquire():
-            die(RC_BUSY, "busy",
-                "another emulator job is running; wait for it to finish")
-        ok, err = kill_stale_unit(env)
-        if not ok:
+            die(RC_BUSY, "busy", "another emulator job holds the slot; wait for it")
+        active = systemctl(env, "is-active", "--quiet", unit).returncode == 0
+        if active:
             adm.release()
-            die(RC_BUSY, "busy", err)
-
-    # payload
-    cmd = args.cmd
-    if not cmd:
-        die(RC_POLICY, "policy", "no command after --")
-
-    mem = parse_size(args.mem)
-    if mem > MAX_MEM_BYTES:
-        die(RC_POLICY, "policy",
-            f"--mem {args.mem} exceeds the hard maximum "
-            f"of {MAX_MEM_BYTES // 1024**3}G")
-    cpu_sec = min(args.cpu_sec, MAX_CPU_SEC)
-    if args.cpu_sec > MAX_CPU_SEC:
-        die(RC_POLICY, "policy",
-            f"--cpu-sec {args.cpu_sec} exceeds the hard maximum of {MAX_CPU_SEC}")
-    wall_sec = min(args.wall_sec, MAX_WALL_SEC)
-    if args.wall_sec > MAX_WALL_SEC:
-        die(RC_POLICY, "policy",
-            f"--wall-sec {args.wall_sec} exceeds the hard maximum of {MAX_WALL_SEC}")
-
-    # ASan needs a large virtual address space; the physical ceiling stays
-    # bounded by the cgroup memory.max
-    limit_as = 16 * 1024**3 if args.job == "work" else 2 * 1024**3
-
-    unit = EMU_UNIT if args.job == "emulator" else ""
-    props = [
-        f"MemoryMax={mem}",
-        "MemorySwapMax=0",
-        f"TasksMax={JOB_TASKS}",
-        f"CPUQuota={JOB_CPU_PCT}%",
-        "OOMPolicy=kill",
-        f"RuntimeMaxSec={wall_sec}",
-        f"TimeoutStopSec={JOB_STOP_SEC}",
-        f"LimitCPU={cpu_sec}",
-        f"LimitNOFILE={JOB_FDS}",
-        "LimitCORE=0",
-        f"LimitAS={limit_as}",
-        "PrivateTmp=no",
-    ]
-
-    run_args = ["systemd-run", "--user", "--wait", "--pipe", "--quiet",
-                "--expand-environment=no",
-                f"--slice={SLICE}",
-                "--working-directory", os.getcwd()]
-    if unit:
-        run_args += [f"--unit={unit}"]
-    for p in props:
-        run_args += ["-p", p]
-    run_args += ["--setenv", f"TMPDIR={work_dir}",
-                 "--setenv", f"OPENBLAS_NUM_THREADS=1",
-                 "--setenv", f"OMP_NUM_THREADS=1",
-                 "--setenv", f"C55X_CONTAINED_JOB={args.job}"]
-
-    run_args.append("--")
-    run_args.extend(cmd)
-
-    try:
-        r = subprocess.run(run_args, env=env, cwd=os.getcwd())
-    except KeyboardInterrupt:
-        # launcher interrupted: stop the unit (its descendants stay inside
-        # the cgroup until the stop grace expires)
-        systemctl(env, "stop", unit or "c55x-run.scope", check=False)
-        die(130, "interrupted", "launcher interrupted; job stopped")
-
-    rc = r.returncode
-
-    # determine the actual outcome from the unit result
-    outcome = "payload"
-    if unit:
-        out = systemctl(env, "show", unit, "-p", "Result",
-                        "-p", "ExecMainStatus", check=False).stdout
-        vals = {}
-        for line in out.strip().splitlines():
-            if "=" in line:
-                k, v = line.split("=", 1)
-                vals[k] = v
-        result = vals.get("Result", "")
-        exec_status = int(vals.get("ExecMainStatus", "0") or "0")
-        systemctl(env, "reset-failed", unit, check=False)
-        if result == UNIT_OOM:
-            if args.job == "emulator":
-                adm.release()
-            die(RC_OOM, "oom",
-                f"job exceeded its {args.mem} memory ceiling and was killed")
-        if result == UNIT_TIMEOUT:
-            if args.job == "emulator":
-                adm.release()
-            die(RC_TIMEOUT, "timeout",
-                f"job exceeded its {wall_sec}s wall-time limit")
-        if result == UNIT_SIGNAL and exec_status in (9, 15) and rc in (1, 255):
-            # systemd-run returns 1 or 255 for signal-killed units
-            if args.job == "emulator":
-                adm.release()
-            die(128 + exec_status, "signal",
-                f"job killed by signal {exec_status}")
-        if rc in (RC_HEADROOM, RC_BUSY, RC_POLICY, RC_OOM, RC_TIMEOUT,
-                  RC_INCOMPLETE) and result not in ("success", "exit-code"):
-            # reserved code from the payload: remap to incomplete
-            if args.job == "emulator":
-                adm.release()
-            die(RC_INCOMPLETE, "incomplete",
-                f"payload exit code {rc} collides with a reserved code; "
-                f"unit Result={result}")
-        # normal: exit-code propagates the payload's status
-        final_rc = rc if rc >= 0 else 256 + rc
-
-    if args.job == "emulator":
-        adm.release()
-    eprint(f"outcome=payload rc={final_rc}")
-    sys.exit(final_rc)
-
-
-def main():
-    # manual split: everything before '--' is options, after is the payload
-    argv = sys.argv[1:]
-    if "--" in argv:
-        idx = argv.index("--")
-        opts = argv[:idx]
-        cmd = argv[idx + 1:]
+            die(RC_BUSY, "busy", "unit %s is still running (possibly orphaned by a dead "
+                "launcher; it stops by itself within its wall-time limit)" % unit)
+        systemctl(env, "reset-failed", unit)      # clear only a finished leftover
     else:
-        opts = argv
-        cmd = []
-    p = argparse.ArgumentParser(add_help=False)
+        unit = "c55x-work-%d-%s.service" % (os.getpid(), uuid.uuid4().hex[:8])
+
+    set_slice_limits(env)
+    stale = LOCK_DIR / (unit + ".verify-failed")
+    if stale.exists():
+        stale.unlink()
+    as_bytes = AS_EMULATOR if args.job == "emulator" else AS_WORK
+    props = ["MemoryMax=%d" % mem, "MemorySwapMax=0", "TasksMax=%d" % JOB_TASKS,
+             "CPUQuota=%d%%" % (JOB_CPU_QUOTA[0] // 1000), "OOMPolicy=kill",
+             "RuntimeMaxSec=%d" % args.wall_sec, "TimeoutStopSec=%d" % JOB_STOP_SEC,
+             "LimitCPU=%d" % args.cpu_sec, "LimitNOFILE=%d" % JOB_FDS,
+             "LimitCORE=0", "LimitAS=%d" % as_bytes]
+    cmd = ["systemd-run", "--user", "--wait", "--pipe", "--quiet",
+           "--expand-environment=no", "--slice=" + SLICE, "--unit=" + unit,
+           "--working-directory", os.getcwd()]
+    for p in props:
+        cmd += ["-p", p]
+    cmd += ["--setenv=C55X_CONTAINED_JOB=" + args.job,
+            "--setenv=TMPDIR=" + str(work_dir)]
+    for v in THREAD_VARS:
+        cmd += ["--setenv=%s=1" % v]
+    for n in forwarded_names(args.env):
+        cmd += ["--setenv=" + n]
+    inner = [sys.executable, os.path.abspath(__file__), "--inner", "--unit", unit,
+             "--mem-bytes", str(mem), "--cpu-sec", str(args.cpu_sec),
+             "--as-bytes", str(as_bytes), "--"]
+    cmd += ["--", *inner, *args.cmd]
+
+    proc = subprocess.Popen(cmd, env=env)
+    state = {"signal": None}
+
+    def stop_own_unit(signum, _frame):
+        state["signal"] = signum
+        systemctl(env, "stop", unit)               # exactly our unit, nothing else
+
+    old = {s: signal.signal(s, stop_own_unit)
+           for s in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)}
+    try:
+        rc = proc.wait()
+    finally:
+        for s, h in old.items():
+            signal.signal(s, h)
+    if state["signal"] is not None:
+        systemctl(env, "reset-failed", unit)
+        if adm:
+            adm.release()
+        die(128 + state["signal"], "interrupted",
+            "launcher received signal %d; its job unit was stopped" % state["signal"])
+
+    code, outcome, msg = classify(env, unit, rc, args.cpu_sec)
+    if adm:
+        adm.release()
+    if code != 0 or outcome != "payload":
+        eprint("outcome=%s %s" % (outcome, msg))
+    sys.exit(code)
+
+
+def parse_mem(args):
+    try:
+        mem = parse_size(args.mem)
+    except ValueError as e:
+        die(RC_POLICY, "policy", str(e))
+    if mem < 16 * 1024 ** 2 or mem > MAX_MEM_BYTES:
+        die(RC_POLICY, "policy", "--mem %s outside 16M..%dG (hard maximum, never widened)"
+            % (args.mem, MAX_MEM_BYTES // GIB))
+    return mem
+
+
+def do_status(env):
+    set_slice_limits(env)
+    p = unit_props(env, SLICE, "MemoryMax", "MemorySwapMax", "TasksMax")
+    busy = systemctl(env, "is-active", "--quiet", EMU_UNIT).returncode == 0
+    avail = mem_available()
+    print("slice %s: MemoryMax=%s MemorySwapMax=%s TasksMax=%s" % (
+        SLICE, p.get("MemoryMax"), p.get("MemorySwapMax"), p.get("TasksMax")))
+    print("emulator slot: %s" % ("busy" if busy else "free"))
+    print("host MemAvailable: %.1f GiB (need %d GiB) -> admission %s" % (
+        avail / GIB, MIN_HEADROOM_BYTES // GIB,
+        "ok" if avail >= MIN_HEADROOM_BYTES else "refused (low headroom)"))
+    return 0
+
+
+def main(argv=None):
+    argv = list(sys.argv[1:] if argv is None else argv)
+    cmd = []
+    if "--" in argv:
+        i = argv.index("--")
+        argv, cmd = argv[:i], argv[i + 1:]
+    p = argparse.ArgumentParser(prog="c55x-contained", add_help=True)
     p.add_argument("--job", choices=("emulator", "work"), default="emulator")
     p.add_argument("--mem", default="1G")
     p.add_argument("--cpu-sec", type=int, default=MAX_CPU_SEC)
     p.add_argument("--wall-sec", type=int, default=MAX_WALL_SEC)
-    p.add_argument("--work-dir", default="build/work")
+    p.add_argument("--work-dir", default=str(REPO_ROOT / "build" / "work"),
+                   help="TMPDIR for the job; must be disk-backed (default: <repo>/build/work)")
     p.add_argument("--status", action="store_true")
-    args = p.parse_args(opts)
+    p.add_argument("--env", action="append", default=[], metavar="NAME",
+                   help="also forward this environment variable (name only; repeatable)")
+    p.add_argument("--inner", action="store_true", help=argparse.SUPPRESS)
+    p.add_argument("--unit", help=argparse.SUPPRESS)
+    p.add_argument("--mem-bytes", type=int, help=argparse.SUPPRESS)
+    p.add_argument("--as-bytes", type=int, help=argparse.SUPPRESS)
+    args = p.parse_args(argv)
     args.cmd = cmd
-    if not args.status and not args.cmd:
-        p.print_usage(sys.stderr)
-        eprint("no command after --")
-        sys.exit(RC_POLICY)
-    run_job(args)
+    if args.inner:
+        return inner_verify(args)
+    return run_job(args)
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

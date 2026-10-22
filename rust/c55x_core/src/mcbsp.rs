@@ -19,6 +19,8 @@ use crate::core::Core;
 use crate::err::{emu, R};
 
 pub const BASES: [u32; 2] = [0x2800, 0x2C00];
+/// Most output samples buffered between take_audio() calls (32 MiB of i16).
+const MAX_AUDIO_SAMPLES: usize = 1 << 24;
 const XEVT: [u32; 2] = [2, 6];
 const XINT: [u32; 2] = [17, 7];
 const DXR2: usize = 2;
@@ -208,7 +210,7 @@ impl Core {
             } else {
                 m.xsr_full = false;
             }
-            self.audio_push(fs, sample);
+            self.audio_push(fs, sample)?;
             if refill {
                 self.mcbsp_emit(i);
                 self.flush_syncs()?;
@@ -222,10 +224,19 @@ impl Core {
         Ok(())
     }
 
-    fn audio_push(&mut self, fs: f64, sample: i16) {
+    /// Buffer one output sample. The buffer is drained by take_audio(); if the
+    /// caller never drains it the run stops with an explicit error instead of
+    /// growing without bound (32 MiB of samples).
+    fn audio_push(&mut self, fs: f64, sample: i16) -> R<()> {
+        if self.audio_samples >= MAX_AUDIO_SAMPLES {
+            return emu(format!(
+                "audio buffer full ({} samples); drain it with take_audio()", MAX_AUDIO_SAMPLES));
+        }
+        self.audio_samples += 1;
         match self.audio.last_mut() {
             Some((rate, s)) if *rate == fs => s.push(sample),
             _ => self.audio.push((fs, vec![sample])),
         }
+        Ok(())
     }
 }
