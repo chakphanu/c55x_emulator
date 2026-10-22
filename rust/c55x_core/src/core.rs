@@ -8,11 +8,10 @@ use std::cmp::Reverse;
 use std::collections::{BinaryHeap, VecDeque};
 use std::rc::Rc;
 
-use crate::ata::{self, Ata};
 use crate::dma::Dma;
 use crate::err::{emu, Error, R};
 use crate::host::{Ctx, Host};
-use crate::icache::{ICache, PcFilter, MAX_CACHED_INSNS};
+use crate::icache::{ICache, MAX_CACHED_INSNS};
 use crate::mcbsp::McBsp;
 use crate::state::State;
 use crate::stmt::{compile_insn, Insn};
@@ -55,8 +54,6 @@ pub struct Core {
     pub py_calls: u64,
     pub trace: Option<(usize, std::collections::VecDeque<u32>)>, // (max length, executed pcs)
     pub odd_longs: Option<std::collections::BTreeMap<u32, u64>>, // pc -> long accesses at odd addresses
-    pub bios_idle: Option<(u32, u32)>,
-    pub poll_loops: PcFilter,
     pub dma: Dma,
     pub mcbsp: [McBsp; 2],
     pub pending_sync: VecDeque<u32>,
@@ -64,7 +61,6 @@ pub struct Core {
     pub timers: BinaryHeap<Reverse<(u64, usize, u32)>>, // (cycle, McBSP, generation)
     pub audio: Vec<(f64, Vec<i16>)>,                    // (sample rate, interleaved L/R)
     pub audio_samples: usize,                           // samples buffered in audio (cap: MAX_AUDIO_SAMPLES)
-    pub ata: Option<Box<Ata>>,                          // attached by ata.py
 }
 
 impl Core {
@@ -74,9 +70,9 @@ impl Core {
         Core {
             st: State::default(), ovf_pending: false, mem, host, hooks: Vec::new(), hook_lo: u32::MAX, code_pages,
             cache: ICache::new(), next_event: u64::MAX,
-            irq_counts: [0; 32], native: 0, compiles: 0, py_writes: 0, py_calls: 0, trace: None, odd_longs: None, bios_idle: None,
-            poll_loops: PcFilter::default(), dma: Dma::default(), mcbsp: Default::default(),
-            pending_sync: VecDeque::new(), flushing: false, timers: BinaryHeap::new(), audio: Vec::new(), audio_samples: 0, ata: None,
+            irq_counts: [0; 32], native: 0, compiles: 0, py_writes: 0, py_calls: 0, trace: None, odd_longs: None,
+            dma: Dma::default(), mcbsp: Default::default(),
+            pending_sync: VecDeque::new(), flushing: false, timers: BinaryHeap::new(), audio: Vec::new(), audio_samples: 0,
         }
     }
 
@@ -92,9 +88,6 @@ impl Core {
     /// The hooked data ranges of the host (peripherals register after the Cpu exists).
     pub fn set_hooks(&mut self, hooks: Vec<(u32, u32)>) {
         self.hooks = hooks;
-        if self.ata.is_some() {                 // served by ata.rs in the hooked path
-            self.hooks.extend([(ata::BASE, ata::BASE + 8), (ata::ALT, ata::ALT + 1)]);
-        }
         self.hook_lo = self.hooks.iter().map(|&(lo, _)| lo).min().unwrap_or(u32::MAX);
     }
 

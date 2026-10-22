@@ -6,7 +6,7 @@ use std::any::Any;
 
 use pyo3::intern;
 use pyo3::prelude::*;
-use pyo3::types::{PyBool, PyByteArray, PyBytes, PyInt, PyList, PyString, PyTuple};
+use pyo3::types::{PyBool, PyByteArray, PyInt, PyList, PyString, PyTuple};
 
 use c55x_core::ast::Ast;
 use c55x_core::core::MEM_BYTES;
@@ -50,7 +50,6 @@ pub struct PyHost {
     code: Py<PyAny>,
     ir_build: Py<PyAny>,
     _mem_obj: Py<PyByteArray>,
-    pub disk: Option<Py<PyAny>>,             // attached by ata.py
 }
 
 fn cfg<'py>(o: &Bound<'py, PyAny>, name: &str) -> PyResult<Bound<'py, PyAny>> {
@@ -78,7 +77,7 @@ impl PyHost {
         let ir_build = py.import("c55x_emu.ir")?.getattr("build")?;
         let host = PyHost {
             cpu: cpu.clone().unbind(), bus: bus.unbind(), code: code.unbind(), ir_build: ir_build.unbind(),
-            _mem_obj: mem_obj.unbind(), disk: None,
+            _mem_obj: mem_obj.unbind(),
         };
         Ok((host, mem, code_pages))
     }
@@ -102,9 +101,6 @@ impl PyHost {
         visit.call(&self.code)?;
         visit.call(&self.ir_build)?;
         visit.call(&self._mem_obj)?;
-        if let Some(d) = &self.disk {
-            visit.call(d)?;
-        }
         Ok(())
     }
 
@@ -183,23 +179,6 @@ impl Host for PyHost {
             let f = cpu.getattr(intern!(py, "audio_clock"))?;
             if f.is_none() { return Ok(None); }
             Ok(Some(f.call0()?.extract::<(f64, f64)>()?))
-        })
-    }
-
-    fn disk_read(&mut self, ctx: &mut Ctx, lba: u64) -> R<Vec<u8>> {
-        let Some(disk) = Python::attach(|py| self.disk.as_ref().map(|d| d.clone_ref(py))) else {
-            return emu("ATA access without an attached disk".into());
-        };
-        self.sync(ctx, |py, _cpu, _bus| disk.bind(py).call_method1(intern!(py, "read"), (lba,))?.extract::<Vec<u8>>())
-    }
-
-    fn disk_write(&mut self, ctx: &mut Ctx, lba: u64, data: &[u8]) -> R<()> {
-        let Some(disk) = Python::attach(|py| self.disk.as_ref().map(|d| d.clone_ref(py))) else {
-            return emu("ATA access without an attached disk".into());
-        };
-        self.sync(ctx, |py, _cpu, _bus| {
-            disk.bind(py).call_method1(intern!(py, "write"), (lba, PyBytes::new(py, data)))?;
-            Ok(())
         })
     }
 

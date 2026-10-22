@@ -67,18 +67,12 @@ impl Core {
     #[cold]
     #[inline(never)]
     fn read_hooked(&mut self, word: u32) -> R<u32> {
-        if self.is_ata(word) {
-            return self.ata_read(word);
-        }
         self.host(|h, ctx| h.read_hooked(ctx, word))
     }
 
     #[cold]
     #[inline(never)]
     fn write_python(&mut self, word: u32, v: u32) -> R<()> {
-        if self.is_ata(word) {
-            return self.ata_write(word, v);
-        }
         self.py_writes += 1;
         self.host(|h, ctx| h.write_hooked(ctx, word, v))
     }

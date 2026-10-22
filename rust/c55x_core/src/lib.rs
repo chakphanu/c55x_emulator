@@ -5,8 +5,6 @@
 
 pub mod addr;
 pub mod ast;
-pub mod ata;
-mod ata_pio;
 pub mod compile;
 pub mod core;
 pub mod dma;

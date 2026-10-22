@@ -7,8 +7,7 @@ use crate::core::Core;
 use crate::err::{emu, R};
 
 impl Core {
-    /// Timer i after delay cycles (generation gen): McBSP i slot batch (mcbsp.rs), or the
-    /// ATA's next step for i = ata::TIMER.
+    /// Timer i after delay cycles (generation gen): McBSP i slot batch (mcbsp.rs).
     pub fn schedule(&mut self, delay: u64, i: usize, gen: u32) {
         self.timers.push(Reverse((self.st.cycles + delay.max(1), i, gen)));
     }
@@ -29,7 +28,7 @@ impl Core {
                 break;
             }
             self.timers.pop();
-            if i == crate::ata::TIMER { self.ata_tick(gen)? } else { self.mcbsp_tick(i, gen)? }
+            self.mcbsp_tick(i, gen)?;
         }
         if self.st.cycles >= self.next_event {
             self.fire_events()?;

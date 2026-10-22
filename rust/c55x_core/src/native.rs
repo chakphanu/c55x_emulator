@@ -126,14 +126,6 @@ impl Host for NativeHost {
         Ok(self.audio_clock)
     }
 
-    fn disk_read(&mut self, _ctx: &mut Ctx, _lba: u64) -> R<Vec<u8>> {
-        emu("ATA access without an attached disk".into())
-    }
-
-    fn disk_write(&mut self, _ctx: &mut Ctx, _lba: u64, _data: &[u8]) -> R<()> {
-        emu("ATA access without an attached disk".into())
-    }
-
     fn decode(&mut self, pc: u32) -> R<Option<Decoded>> {
         Ok(self.decoded.get(&pc).cloned())
     }

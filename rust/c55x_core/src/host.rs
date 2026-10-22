@@ -1,8 +1,7 @@
 //! The host of a core: everything outside the CPU semantics that the core calls on cold
 //! paths (hooked peripheral words, unmodeled ports, events, idle and clock models, the
-//! instruction decoder, disk sectors). The hot path (memory, state, compiled
-//! instructions) never goes through it. Memory is a stable byte pointer owned by the
-//! host (core.rs).
+//! instruction decoder). The hot path (memory, state, compiled instructions) never goes
+//! through it. Memory is a stable byte pointer owned by the host (core.rs).
 
 use std::any::Any;
 
@@ -45,9 +44,6 @@ pub trait Host {
     fn idle_execute(&mut self, ctx: &mut Ctx) -> R<Option<bool>>;
     /// (sample rate in Hz, CPU MHz) for the audio McBSP; None: no audio clock model.
     fn audio_clock(&mut self, ctx: &mut Ctx) -> R<Option<(f64, f64)>>;
-    /// One 512-byte sector of the attached disk.
-    fn disk_read(&mut self, ctx: &mut Ctx, lba: u64) -> R<Vec<u8>>;
-    fn disk_write(&mut self, ctx: &mut Ctx, lba: u64, data: &[u8]) -> R<()>;
     /// Decode the instruction at pc (None: nothing decoded there).
     fn decode(&mut self, pc: u32) -> R<Option<Decoded>>;
     /// Which pages first..=last hold decoded instructions (writes there go through the

@@ -58,10 +58,6 @@ impl PyCore {
         self.core.host.as_any().downcast_ref().expect("a PyCore always has a PyHost")
     }
 
-    fn pyhost_mut(&mut self) -> &mut PyHost {
-        self.core.host.as_any_mut().downcast_mut().expect("a PyCore always has a PyHost")
-    }
-
     /// Load the state from the Python Cpu (it is authoritative between calls).
     fn enter<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         // Re-validate containment at execution entries (guard.rs REVALIDATE_EVERY):
@@ -74,9 +70,6 @@ impl PyCore {
         sync::load(c, py, &cpu)?;
         c.set_hooks(hooks);
         c.next_event = peek_event(py, &cpu)?;
-        let idle = cpu.getattr("bios_idle")?;
-        c.bios_idle = if idle.is_none() { None } else { Some(idle.extract()?) };
-        c.poll_loops = PcFilter::new(cpu.getattr("poll_loops")?.extract()?);
         Ok(cpu)
     }
 
@@ -132,29 +125,6 @@ impl PyCore {
         let cpu = self.enter(py)?;
         let r = self.core.ret().map(|t| self.core.st.pc = t);
         self.leave(py, &cpu, r)
-    }
-
-    /// Attach the ATA disk (ata.py): disk.Disk-like object, its size, IDENTIFY words.
-    fn ata_attach(&mut self, disk: Py<PyAny>, sectors: u64, identify: Vec<u16>) -> PyResult<()> {
-        if identify.len() != 256 { return Err(pyo3::exceptions::PyValueError::new_err("IDENTIFY: 256 words")); }
-        self.pyhost_mut().disk = Some(disk);
-        self.core.ata = Some(Box::new(c55x_core::ata::Ata::new(sectors, identify)));
-        Ok(())
-    }
-
-    /// An ATA register access from Python (tools, tests), as the CPU would make it.
-    #[pyo3(signature = (word, value=None))]
-    fn ata_io(&mut self, py: Python<'_>, word: u32, value: Option<u32>) -> PyResult<u32> {
-        if !self.core.is_ata(word) { return Err(pyo3::exceptions::PyValueError::new_err("not an ATA register")); }
-        let cpu = self.enter(py)?;
-        let r = match value { None => self.core.ata_read(word), Some(v) => self.core.ata_write(word, v).map(|_| 0) };
-        self.leave(py, &cpu, r)
-    }
-
-    /// ATA counters: ({command: count}, {unmodeled access: count}).
-    fn ata_stats(&self) -> PyResult<(std::collections::BTreeMap<u8, u64>, std::collections::BTreeMap<String, u64>)> {
-        let a = self.core.ata.as_ref().ok_or_else(|| pyo3::exceptions::PyValueError::new_err("no ATA attached"))?;
-        Ok((a.commands.clone(), a.unknown.clone()))
     }
 
     /// Let cycles pass without executing instructions: due core timers and Python events fire.

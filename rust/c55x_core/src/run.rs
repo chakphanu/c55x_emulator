@@ -245,13 +245,6 @@ impl Core {
         Ok(None)
     }
 
-    fn bios_idle_empty(&mut self, list: u32) -> R<bool> {
-        let hi = self.read(list)?;
-        let lo = self.read(list + 1)?;
-        let hooks = ((hi << 16) | lo) & 0x7FFFFF;
-        Ok(self.read(hooks)? == 0 && self.read(hooks + 1)? == 0)
-    }
-
     /// Time passes without instructions: fire everything due up to cycles + n.
     pub fn advance(&mut self, n: u64) -> R<()> {
         entry_guard()?;
@@ -267,25 +260,17 @@ impl Core {
     /// Cpu.run: -> true when stuck idle with nothing scheduled.
     pub fn run(&mut self, max_steps: u64, stop: &crate::icache::PcFilter, until: Option<u64>) -> R<bool> {
         entry_guard()?;
-        let idle = self.bios_idle;
         for _ in 0..max_steps {
             let pc = self.st.pc;
             self.step_once()?;
             if stop.contains(self.st.pc) || until.map_or(false, |u| self.st.cycles >= u) {
                 return Ok(false);
             }
-            let waited = if self.poll_loops.contains(self.st.pc) {
-                self.wait(until, false)?
-            } else if self.st.in_idle {
+            let waited = if self.st.in_idle {
                 let stopped = self.clock_stopped()?;
                 self.wait(until, stopped)?
             } else {
-                let mut stuck = self.st.pc == pc && self.st.loop_active[0] == 0;
-                if !stuck {
-                    if let Some((ipc, list)) = idle {
-                        stuck = self.st.pc == ipc && self.bios_idle_empty(list)?;
-                    }
-                }
+                let stuck = self.st.pc == pc && self.st.loop_active[0] == 0;
                 if !stuck { continue; }
                 let intm = self.st.st1 & ST1_INTM != 0;
                 self.wait(until, intm)?
