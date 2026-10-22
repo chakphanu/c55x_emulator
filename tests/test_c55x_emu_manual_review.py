@@ -141,7 +141,6 @@ class ProductSignTests(unittest.TestCase):
     whatever the operand form. The value for 8000h x 8000h with FRCT = 1 and
     SMUL = 0 follows the manual text and is a hardware-validation item."""
 
-    @unittest.expectedFailure       # not fixed yet (F18)
     def test_smem_and_accumulator_forms_agree(self):
         cpu, bus = machine(bit(FRCT), "T1 = #-32768", "XAR1 = mar(*(#01600h))",
                            "AC0 = T1 * *AR1", "AC1 = AC1 * T1")
