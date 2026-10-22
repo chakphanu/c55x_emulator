@@ -6,12 +6,43 @@ use std::any::Any;
 
 use pyo3::intern;
 use pyo3::prelude::*;
-use pyo3::types::{PyByteArray, PyBytes, PyList};
+use pyo3::types::{PyBool, PyByteArray, PyBytes, PyInt, PyList, PyString, PyTuple};
 
-use crate::ast::Ast;
-use crate::core::MEM_BYTES;
-use crate::err::{emu, R};
-use crate::host::{Ctx, Decoded, Host};
+use c55x_core::ast::Ast;
+use c55x_core::core::MEM_BYTES;
+use c55x_core::err::{emu, Error, R};
+use c55x_core::host::{Ctx, Decoded, Host};
+
+/// A Python exception raised in a host callback travels in Error::Host (lib.rs to_py
+/// takes it out again).
+trait Py2R<T> {
+    fn h(self) -> R<T>;
+}
+
+impl<T> Py2R<T> for PyResult<T> {
+    fn h(self) -> R<T> {
+        self.map_err(|e| Error::Host(Box::new(e)))
+    }
+}
+
+/// The ir.py tuple of an instruction as an Ast (on the compile path, cache miss).
+pub fn ast_from_py(o: &Bound<'_, PyAny>) -> R<Ast> {
+    Ok(if o.is_none() {
+        Ast::None
+    } else if let Ok(b) = o.cast::<PyBool>() {
+        Ast::Bool(b.is_true())
+    } else if o.is_instance_of::<PyInt>() {
+        Ast::Int(o.extract::<i64>().h()?)
+    } else if let Ok(s) = o.cast::<PyString>() {
+        Ast::Str(s.to_str().h()?.to_owned())
+    } else if let Ok(t) = o.cast::<PyTuple>() {
+        Ast::Tuple(t.iter().map(|x| ast_from_py(&x)).collect::<R<_>>()?)
+    } else if let Ok(l) = o.cast::<PyList>() {
+        Ast::List(l.iter().map(|x| ast_from_py(&x)).collect::<R<_>>()?)
+    } else {
+        return emu(format!("IR value of type {}", o.get_type().name().h()?));
+    })
+}
 
 pub struct PyHost {
     pub cpu: Py<PyAny>,
@@ -84,23 +115,23 @@ impl PyHost {
         Python::attach(|py| -> R<T> {
             let cpu = self.cpu.bind(py).clone();
             let bus = self.bus.bind(py).clone();
-            cpu.setattr(intern!(py, "cycles"), ctx.cycles)?;
-            cpu.setattr(intern!(py, "pc"), ctx.pc)?;
-            cpu.setattr(intern!(py, "ifr0"), ctx.ifr0)?;
-            cpu.setattr(intern!(py, "ifr1"), ctx.ifr1)?;
+            cpu.setattr(intern!(py, "cycles"), ctx.cycles).h()?;
+            cpu.setattr(intern!(py, "pc"), ctx.pc).h()?;
+            cpu.setattr(intern!(py, "ifr0"), ctx.ifr0).h()?;
+            cpu.setattr(intern!(py, "ifr1"), ctx.ifr1).h()?;
             let r = f(py, &cpu, &bus);
-            ctx.ifr0 = cpu.getattr(intern!(py, "ifr0"))?.extract()?;
-            ctx.ifr1 = cpu.getattr(intern!(py, "ifr1"))?.extract()?;
-            ctx.next_event = peek_event(py, &cpu)?;
-            let dropped = self.code.bind(py).getattr(intern!(py, "dropped"))?;
-            let dropped = dropped.cast::<PyList>().map_err(PyErr::from)?;
+            ctx.ifr0 = cpu.getattr(intern!(py, "ifr0")).and_then(|v| v.extract()).h()?;
+            ctx.ifr1 = cpu.getattr(intern!(py, "ifr1")).and_then(|v| v.extract()).h()?;
+            ctx.next_event = peek_event(py, &cpu).h()?;
+            let dropped = self.code.bind(py).getattr(intern!(py, "dropped")).h()?;
+            let dropped = dropped.cast::<PyList>().map_err(PyErr::from).h()?;
             if !dropped.is_empty() {
                 for p in dropped.iter() {
-                    ctx.dropped.push(p.extract()?);
+                    ctx.dropped.push(p.extract().h()?);
                 }
-                dropped.call_method0(intern!(py, "clear"))?;
+                dropped.call_method0(intern!(py, "clear")).h()?;
             }
-            Ok(r?)
+            r.h()
         })
     }
 }
@@ -174,16 +205,16 @@ impl Host for PyHost {
 
     fn decode(&mut self, pc: u32) -> R<Option<Decoded>> {
         Python::attach(|py| -> R<Option<Decoded>> {
-            let insn = self.code.bind(py).call_method1(intern!(py, "get"), (pc,))?;
+            let insn = self.code.bind(py).call_method1(intern!(py, "get"), (pc,)).h()?;
             if insn.is_none() {
                 return Ok(None);
             }
-            let size: u32 = insn.getattr(intern!(py, "size"))?.extract()?;
-            let text: String = insn.getattr(intern!(py, "text"))?.extract()?;
-            let resolve = self.cpu.bind(py).getattr(intern!(py, "resolve"))?;
+            let size: u32 = insn.getattr(intern!(py, "size")).and_then(|v| v.extract()).h()?;
+            let text: String = insn.getattr(intern!(py, "text")).and_then(|v| v.extract()).h()?;
+            let resolve = self.cpu.bind(py).getattr(intern!(py, "resolve")).h()?;
             let ir = match self.ir_build.bind(py).call1((&insn, resolve)) {
                 Err(e) => Err(e.to_string()),
-                Ok(ir) => Ok(Ast::from_py(&ir)?),
+                Ok(ir) => Ok(ast_from_py(&ir)?),
             };
             Ok(Some(Decoded { size, text, ir }))
         })
@@ -191,9 +222,9 @@ impl Host for PyHost {
 
     fn code_pages_around(&mut self, first: u32, last: u32, out: &mut Vec<(u32, bool)>) -> R<()> {
         Python::attach(|py| -> R<()> {
-            let pages = self.code.bind(py).getattr(intern!(py, "pages"))?;
+            let pages = self.code.bind(py).getattr(intern!(py, "pages")).h()?;
             for p in first..=last {
-                out.push((p, pages.contains(p)?));
+                out.push((p, pages.contains(p).h()?));
             }
             Ok(())
         })

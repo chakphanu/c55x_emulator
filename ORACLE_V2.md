@@ -1,6 +1,7 @@
 # Oracle v2 build
 
-A build of this repository's `rust/c55x_core` for use as a differential
+A build of this repository's core (`rust/c55x_core`, as the Python extension
+`rust/c55x_py`) for use as a differential
 oracle. The reference build it replaces is the `3dbef971e814e1e7...`
 core (SQDST-corrected snapshot; this repository's `8871bc9` is
 byte-identical to its source).

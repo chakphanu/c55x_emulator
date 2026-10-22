@@ -26,8 +26,10 @@ exit-code table: `CONTAINMENT.md`.
 
 ## The reference core
 
-`build/py/c55x_core.so` is the reference core. Build it only with
-`rust/build.sh` from a clean commit and confirm its SHA256 against
+`build/py/c55x_core.so` is the reference core: the Python extension built from
+the Cargo workspace `rust/` (`c55x_core`: the core itself, no Python;
+`c55x_py`: the extension module `c55x_core`; `c55x_run`: the host without
+Python). Build it only with `rust/build.sh` from a clean commit and confirm its SHA256 against
 `ORACLE_V2.md`. Do not replace it, copy another `c55x_core.so` over it, or
 point `ZEN_CORE_DIR` at a core of unknown origin. Moving any pin to a new core
 build needs explicit confirmation from the repository owner.

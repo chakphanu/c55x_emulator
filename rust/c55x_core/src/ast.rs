@@ -1,10 +1,7 @@
-//! The instruction IR of ir.py as plain data. compile.rs and stmt.rs read an Ast instead
-//! of Python objects; the Python tuple is converted once, on the compile (cache miss)
-//! path. Access follows the Python rules the compiler relied on: a bool is an int, an int
-//! is not a bool, str / list / tuple are distinct, == compares like Python.
-
-use pyo3::prelude::*;
-use pyo3::types::{PyBool, PyInt, PyList, PyString, PyTuple};
+//! The instruction IR of ir.py as plain data. compile.rs and stmt.rs read an Ast; a host
+//! builds it when it decodes an instruction (the Python host converts the ir.py tuple).
+//! Access follows the Python rules the compiler relied on: a bool is an int, an int is
+//! not a bool, str / list / tuple are distinct, == compares like Python.
 
 use crate::err::{emu, R};
 
@@ -18,24 +15,6 @@ pub enum Ast {
 }
 
 impl Ast {
-    pub fn from_py(o: &Bound<'_, PyAny>) -> R<Ast> {
-        Ok(if o.is_none() {
-            Ast::None
-        } else if let Ok(b) = o.cast::<PyBool>() {
-            Ast::Bool(b.is_true())
-        } else if o.is_instance_of::<PyInt>() {
-            Ast::Int(o.extract::<i64>()?)
-        } else if let Ok(s) = o.cast::<PyString>() {
-            Ast::Str(s.to_str()?.to_owned())
-        } else if let Ok(t) = o.cast::<PyTuple>() {
-            Ast::Tuple(t.iter().map(|x| Ast::from_py(&x)).collect::<R<_>>()?)
-        } else if let Ok(l) = o.cast::<PyList>() {
-            Ast::List(l.iter().map(|x| Ast::from_py(&x)).collect::<R<_>>()?)
-        } else {
-            return emu(format!("IR value of type {}", o.get_type().name()?));
-        })
-    }
-
     pub fn is_none(&self) -> bool {
         matches!(self, Ast::None)
     }

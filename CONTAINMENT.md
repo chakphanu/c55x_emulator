@@ -16,8 +16,8 @@ Options, exit codes and the do/do-not list are in
 reference core (`ORACLE_V2.md`). To try a new core build without touching it:
 
     CARGO_TARGET_DIR=$PWD/build/candidate-rust cargo build --release \
-        --manifest-path rust/c55x_core/Cargo.toml
-    mkdir -p build/candidate && cp build/candidate-rust/release/libc55x_core.so build/candidate/c55x_core.so
+        --manifest-path rust/Cargo.toml -p c55x_py
+    mkdir -p build/candidate && cp build/candidate-rust/release/libc55x_py.so build/candidate/c55x_core.so
     ZEN_CORE_DIR=$PWD/build/candidate bin/c55x-contained -- python3 -m unittest discover -s tests -t .
 
 ## Policy

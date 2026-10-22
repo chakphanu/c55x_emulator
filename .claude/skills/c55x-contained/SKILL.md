@@ -104,7 +104,8 @@ outcome prints one line on stderr starting with `c55x-contained: outcome=`.
 - Replace the reference core `build/py/c55x_core.so` (the guarded build listed in
   `ORACLE_V2.md`), or use `build/afce/` (the older build without the guard, kept for
   regression comparison only). A new core build goes to its own output directory (`CARGO_TARGET_DIR=build/candidate-rust cargo
-  build --release ...`, then use it with `ZEN_CORE_DIR=<dir>`). Moving
+  build --release --manifest-path rust/Cargo.toml -p c55x_py`, copy `libc55x_py.so` to
+  `<dir>/c55x_core.so`, then use it with `ZEN_CORE_DIR=<dir>`). Moving
   downstream pins to a new core needs explicit owner confirmation.
 
 ## Trust boundary and limits

@@ -1,7 +1,8 @@
 # c55x_emulator
 
 Emulator for the TI TMS320C55x DSP of the Zen Touch player (Jukebox2): a Python machine
-model (`c55x_emu/`) on a Rust CPU core (`rust/c55x_core`), with models for the ATA disk,
+model (`c55x_emu/`) on a Rust CPU core (`rust/c55x_core`, loaded as the extension
+`rust/c55x_py`), with models for the ATA disk,
 NOR flash, LCD, audio codec, MCU and USB/MTP. It ships no firmware and no vendor code:
 you supply your own updater EXE.
 

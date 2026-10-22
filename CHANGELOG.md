@@ -1,6 +1,7 @@
 # Changelog
 
-Guest-visible behavior changes of the CPU core (`rust/c55x_core`), newest first.
+Guest-visible behavior changes of the CPU core (`rust/c55x_core`; Python extension
+`rust/c55x_py`), newest first.
 Every entry gives the observable change, the manual it follows, the evidence level,
 the test that pins it and the commit.
 
