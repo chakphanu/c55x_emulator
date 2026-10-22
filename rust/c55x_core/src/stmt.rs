@@ -335,11 +335,10 @@ fn exec_body(m: &mut Core, i: &Insn, data: bool) -> R<Option<u32>> {
             }
             executed += 1;
         }
-        if let Some((_, code)) = &i.repeat_condition {
-            if executed == n + 1 {
-                m.st.set(reg("RPTC")?, (code << 8) as i128);
-                m.st.csr = 0;
-            }
+        // SPRU374E 4.61 example: RPTC reads 0000 after a completed loop
+        if i.repeat_condition.is_some() && executed == n + 1 {
+            m.st.set(reg("RPTC")?, 0);
+            m.st.csr = 0;
         }
         m.st.cycles += if i.repeat_condition.is_some() { executed as u64 } else { n as u64 };
         let after = i.nxt + body.size;

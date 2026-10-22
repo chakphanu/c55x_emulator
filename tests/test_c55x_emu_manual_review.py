@@ -391,9 +391,10 @@ class DualArithmeticTests(unittest.TestCase):
 
 class ConditionalRepeatTests(unittest.TestCase):
     """RPTCC k8, cond (SPRU374E 4.61): while the condition holds the next
-    instruction runs k8 + 1 times; RPTC(15-8) holds the condition code and
-    RPTC(7-0) the number of iterations not performed (0 when the condition
-    never fails). The body is a SUBC, which leaves TC1 unchanged."""
+    instruction runs k8 + 1 times. After a completed loop RPTC reads 0000 (the
+    4.61 example); after an early exit RPTC(7-0) holds the number of iterations
+    not performed (the high byte is not shown in the manual and is not
+    asserted). The body is a SUBC, which leaves TC1 unchanged."""
 
     def repeat(self, cond, tc1):
         cpu, bus = machine("XAR1 = mar(*(#0200h))", f"bit(ST0, #13) = #{tc1}",
@@ -406,15 +407,16 @@ class ConditionalRepeatTests(unittest.TestCase):
 
     def test_true_condition_runs_k8_plus_1_times(self):
         cpu = self.repeat("TC1", 1)
-        self.assertEqual((cpu.ac[1], cpu.carry, cpu.t[0]), (0x00_6560_000F, 1, 0x6400))
+        self.assertEqual((cpu.ac[1], cpu.carry, cpu.t[0]), (0x00_6560_000F, 1, 0x0000))
 
     def test_false_condition_runs_no_iteration(self):
         cpu = self.repeat("TC1", 0)
-        self.assertEqual((cpu.ac[1], cpu.t[0]), (0x00_0746_0000, 0x6404))
+        # the 4.61 table gives RPTC(7-0) only: k8 + 1 iterations not performed
+        self.assertEqual((cpu.ac[1], cpu.t[0] & 0xFF), (0x00_0746_0000, 0x04))
 
     def test_negated_condition(self):
         cpu = self.repeat("!TC1", 0)
-        self.assertEqual((cpu.ac[1], cpu.t[0]), (0x00_6560_000F, 0x7400))
+        self.assertEqual((cpu.ac[1], cpu.t[0]), (0x00_6560_000F, 0x0000))
 
 
 class ExecuteConditionallyTests(unittest.TestCase):
