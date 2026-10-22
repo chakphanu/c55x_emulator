@@ -51,12 +51,14 @@ pub fn get_fx(e: &Rc<Expr>) -> Fx {
         Expr::Rnd(x) => { let f = arith_fx(x, false, true, true); Box::new(move |m| { let v = f(m)?; Ok(rnd(m, v)) }) }
         Expr::Saturate(x) => {
             let f = arith_fx(x, false, true, true);
-            // expr::get: an overflow at bit 31 reports ACOVy (SPRU374E 4.69)
+            // expr::get: an overflow at bit 31 reports ACOVy, SATR clears the 16 LSBs
+            // (SPRU374E 4.69)
+            let low: i128 = if matches!(x.as_ref(), Expr::Rnd(_)) { !0xFFFF } else { !0 };
             Box::new(move |m| {
                 let v = f(m)?;
                 let s = v.clamp(-(1i128 << 31), (1i128 << 31) - 1);
                 m.ovf_pending |= s != v;
-                Ok(s)
+                Ok(s & low)
             })
         }
         Expr::Bit(x, k) => { let (f, k) = (raw_fx(x, false, false), *k); Box::new(move |m| Ok((f(m)? >> k) & 1)) }

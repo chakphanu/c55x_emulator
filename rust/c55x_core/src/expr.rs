@@ -276,12 +276,13 @@ pub fn get(m: &mut Core, e: &Expr) -> R<i128> {
         Expr::Abs(x) => arith(m, x, false, true, false)?.abs(),
         Expr::Rnd(x) => { let v = arith(m, x, false, true, true)?; rnd(m, v) }
         // saturate (SPRU375G): to 32 bits whatever M40 says; an overflow at bit 31 is
-        // reported in the destination ACOVy (SPRU374E 4.69)
+        // reported in the destination ACOVy (SPRU374E 4.69); SATR clears the 16 LSBs
+        // of the saturated result (4.69 example: 00 7FFF 8000 -> 00 7FFF 0000)
         Expr::Saturate(x) => {
             let v = arith(m, x, false, true, true)?;
             let s = v.clamp(-(1i128 << 31), (1i128 << 31) - 1);
             m.ovf_pending |= s != v;
-            s
+            if matches!(x.as_ref(), Expr::Rnd(_)) { s & !0xFFFF } else { s }
         }
         Expr::Exp(x) => {
             let v = sext(get(m, x)?, 40);

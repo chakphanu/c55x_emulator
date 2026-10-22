@@ -180,7 +180,6 @@ class StatusFlagTests(unittest.TestCase):
         self.assertEqual(cpu.ac[1], 0xFF_8000_0000)
         self.assertEqual(cpu.core.acov(), [0, 1, 0, 0])
 
-    @unittest.expectedFailure       # not fixed yet (F12)
     def test_satr_clears_the_low_word_after_saturation(self):
         # SPRU374E 4.69 example: SATR AC0, AC1 with RDM = 0
         cpu, _ = machine("AC1 = saturate(rnd(AC0))")

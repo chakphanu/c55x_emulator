@@ -75,7 +75,8 @@ class SaturationTests(unittest.TestCase):
         cpu, _ = machine("AC1 = saturate(rnd(AC0))", "AC3 = rnd(AC2)")
         cpu.ac[0], cpu.ac[2] = 0x7FFF_C000, 0x1234_8000
         run(cpu)
-        self.assertEqual((cpu.ac[1], cpu.ac[3]), (0x7FFF_FFFF, 0x1235_0000))
+        # SATR clears the 16 LSBs after saturating (SPRU374E 4.69 SATR example)
+        self.assertEqual((cpu.ac[1], cpu.ac[3]), (0x7FFF_0000, 0x1235_0000))
 
 
 class ExecuteAfterPartnerTests(unittest.TestCase):    # SPRU375G 5-160
