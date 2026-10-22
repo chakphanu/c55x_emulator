@@ -141,11 +141,14 @@ impl State {
         }
     }
 
+    /// SPRU371F 2.10.1.1: ACOV2 = bit 15, ACOV3 = bit 14, ACOV0 = bit 10, ACOV1 = bit 9.
     pub fn st0(&self) -> u32 {
-        (self.tc1 << 13) | (self.tc2 << 12) | (self.carry << 11) | ((self.xdp >> 7) & 0x1FF)
+        (self.acov[2] << 15) | (self.acov[3] << 14) | (self.tc1 << 13) | (self.tc2 << 12)
+            | (self.carry << 11) | (self.acov[0] << 10) | (self.acov[1] << 9) | ((self.xdp >> 7) & 0x1FF)
     }
 
     fn set_st0(&mut self, v: u32) {
+        self.acov = [(v >> 10) & 1, (v >> 9) & 1, (v >> 15) & 1, (v >> 14) & 1];
         self.tc1 = (v >> 13) & 1;
         self.tc2 = (v >> 12) & 1;
         self.carry = (v >> 11) & 1;

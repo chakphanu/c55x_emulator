@@ -153,14 +153,12 @@ class ProductSignTests(unittest.TestCase):
 
 
 class StatusFlagTests(unittest.TestCase):
-    @unittest.expectedFailure       # not fixed yet (F2)
     def test_acov_is_part_of_st0(self):
         # SPRU371F 2.10.1.1: ACOV0 is bit 10 of ST0_55, read/write
         cpu, _ = machine("AC0 = #0x7FFFFFFF", "AC0 = AC0 + #1", "T0 = @ST0_L || mmap()")
         run(cpu)
         self.assertEqual((cpu.t[0] >> 10) & 1, 1)
 
-    @unittest.expectedFailure       # not fixed yet (F2)
     def test_bclr_acov0_clears_the_flag(self):
         cpu, _ = machine("AC0 = #0x7FFFFFFF", "AC0 = AC0 + #1", "bit(ST0, #10) = #0")
         run(cpu)
