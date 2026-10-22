@@ -9,3 +9,5 @@ name = "c55x-fixtures"
 path = "src/main.rs"
 
 [dependencies]
+c55x_core = { path = "../c55x_core" }
+sha2 = "0.10"

@@ -500,3 +500,13 @@ test is ported too.
 | ImageCaps.test_image_info_reports_name_size_sections_and_digest | c55x_run tests/cli.rs::image_caps::image_snapshot_is_reported_and_checked | Machine._image_info is gone; c55x-run reports the snapshot digest, which the segments must rebuild, and checks each segment digest |
 | ImageCaps.test_an_image_larger_than_the_address_space_is_refused_before_allocation | c55x_run tests/cli.rs::image_caps::an_image_larger_than_the_address_space_is_refused_before_allocation | declared segment sizes over MAX_IMAGE_BYTES are refused before any file is read or memory allocated |
 | containment test_trace_length_cap_is_an_explicit_error | containment.rs::inside::trace_length_cap_is_an_explicit_error | Core::set_trace with MAX_TRACE_LEN |
+
+## 12. Launcher payloads
+
+test_work_class_job_cannot_construct_a_core, test_core_runs_in_a_slot_other_than_zero and
+test_similarly_named_group_outside_the_shared_slice_is_refused now run c55x-run on the probe
+fixture rust/fixtures/launcher: one call that stores 0x100, read to output.pcm. The
+c55x-run inputs (code.bin, image.json, code.listing.tsv) come from c55x-fixtures
+(`run_inputs` in fixture.txt); probe.call.json and input.bin are written by hand. A
+refusal is c55x-run's exit status 3 with "refused outside the managed containment" on
+stderr. test_c55x_launcher.py imports nothing from c55x_emu or c55x_core.

@@ -1,0 +1,5 @@
+# c55x listing/1 (c55x-fixtures, from prog.lst)
+020000	4	-	AC0 = #256
+020004	2	-	*AR2 = AC0
+020006	2	-	return
+020008	1	-	nop

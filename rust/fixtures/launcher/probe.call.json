@@ -1,0 +1,122 @@
+{
+ "schema": "c55x-call-script/1",
+ "image": "image.json",
+ "listing": "code.listing.tsv",
+ "return_sentinel": "0xffff00",
+ "limits": {
+  "max_steps_per_call": 1000,
+  "chunk_steps": 16,
+  "max_seconds_per_call": 10
+ },
+ "on_unmodeled_port": "error",
+ "on_code_page_write": "error",
+ "register_carry_over": true,
+ "initial_state": {
+  "xcdp": 0,
+  "xdp": 0,
+  "tc1": 0,
+  "tc2": 0,
+  "carry": 0,
+  "st3": 0,
+  "ier0": 0,
+  "ier1": 0,
+  "ifr0": 0,
+  "ifr1": 0,
+  "dbstat": 0,
+  "brc0": 0,
+  "brc1": 0,
+  "brs1": 0,
+  "csr": 0,
+  "rsa0": 0,
+  "rsa1": 0,
+  "rea0": 0,
+  "rea1": 0,
+  "reta": 0,
+  "cfct": 0,
+  "pc": 0,
+  "cycles": 0,
+  "trn0": 0,
+  "trn1": 0,
+  "bk03": 0,
+  "bk47": 0,
+  "bkc": 0,
+  "bsa01": 0,
+  "bsa23": 0,
+  "bsa45": 0,
+  "bsa67": 0,
+  "bsac": 0,
+  "pdp": 0,
+  "dbier0": 0,
+  "dbier1": 0,
+  "bios37": 0,
+  "xpc": 0,
+  "rptc": 0,
+  "ac": [
+   0,
+   0,
+   0,
+   0
+  ],
+  "t": [
+   0,
+   0,
+   0,
+   0
+  ],
+  "xar": [
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0
+  ],
+  "acov": [
+   0,
+   0,
+   0,
+   0
+  ],
+  "loop_active": [
+   null,
+   null
+  ],
+  "xsp": 4096,
+  "ssp": 2048,
+  "st1": 18688,
+  "st2": 32768,
+  "ivpd": 65535,
+  "ivph": 65535,
+  "skip_next": false,
+  "skip_data_next": false,
+  "in_idle": false
+ },
+ "setup": [],
+ "records": {
+  "record_bytes": 2,
+  "partial_record": "error",
+  "steps": [
+   {
+    "op": "call",
+    "label": "probe",
+    "entry": "0x20000",
+    "regs": {
+     "xar2": "0x1700"
+    }
+   },
+   {
+    "op": "read",
+    "word_address": "0x1700",
+    "words": 1,
+    "format": "s16",
+    "to": "output"
+   }
+  ]
+ },
+ "output": {
+  "format": "s16le",
+  "scaling": "none"
+ }
+}

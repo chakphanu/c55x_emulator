@@ -7,7 +7,10 @@
 //!   prog.lst     dis55 -qq -r -g of the linked program (the runtime listing flags)
 //!   prog.hex     the loaded sections of the linked program (see write_image)
 //!   prog.sym     its symbols, 'NAME 0xVALUE' sorted by value (labels: test entry points)
-//! 'write' regenerates prog.lst, prog.hex and prog.sym, 'check' fails when they differ from what
+//! and, when fixture.txt has a line 'run_inputs', the inputs of c55x-run for the program:
+//!   code.bin, image.json (c55x-memory-image/1: code.bin as the one segment over zero
+//!   memory), code.listing.tsv (c55x listing/1)
+//! 'write' regenerates these files, 'check' fails when they differ from what
 //! the tools produce now. Other files in a fixture directory (expected results) are
 //! not touched.
 //!
@@ -19,6 +22,9 @@ use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{exit, Command};
+
+use c55x_core::core::MEM_BYTES;
+use sha2::{Digest, Sha256};
 
 const FILE_HDR: usize = 22;             // magic, nscns, time, symptr, nsyms, opthdr, flags, target
 const OPT_HDR: usize = 28;
@@ -128,6 +134,36 @@ fn origin(dir: &Path) -> Result<u32, String> {
     Err("fixture.txt has no 'origin' line".into())
 }
 
+fn has_option(dir: &Path, option: &str) -> bool {
+    fs::read_to_string(dir.join("fixture.txt")).is_ok_and(|t| t.lines().any(|l| l.trim() == option))
+}
+
+fn sha(data: &[u8]) -> String {
+    Sha256::digest(data).iter().map(|b| format!("{:02x}", b)).collect()
+}
+
+/// code.bin, image.json and code.listing.tsv for c55x-run: the .text section over zero
+/// memory and the listing rows (pc, size, block_end, text).
+fn run_inputs(lst: &str, sections: &[(String, u32, Vec<u8>)]) -> Result<Vec<(&'static str, Vec<u8>)>, String> {
+    let [(_, base, code)] = sections else { return Err("run_inputs needs exactly one section".into()) };
+    let mut mem = vec![0u8; MEM_BYTES];
+    mem[*base as usize..*base as usize + code.len()].copy_from_slice(code);
+    let image = format!(concat!(
+        "{{\"format\": \"c55x-memory-image/1\", \"size_bytes\": {}, \"snapshot_sha256\": \"{}\", ",
+        "\"segments\": [{{\"file\": \"code.bin\", \"byte_address\": {}, \"bytes\": {}, \"sha256\": \"{}\"}}]}}\n"),
+        MEM_BYTES, sha(&mem), base, code.len(), sha(code));
+    let insns = c55x_core::frontend::listing::parse(lst, true).map_err(|e| match e {
+        c55x_core::err::Error::Emu(m) | c55x_core::err::Error::Unsupported(m) | c55x_core::err::Error::Policy(m) => m,
+        c55x_core::err::Error::Host(_) => "listing".into(),
+    })?;
+    let mut tsv = String::from("# c55x listing/1 (c55x-fixtures, from prog.lst)\n");
+    for i in insns.values() {
+        let end = i.block_end.map_or("-".to_string(), |e| format!("{:06x}", e));
+        let _ = writeln!(tsv, "{:06x}\t{}\t{}\t{}", i.addr, i.size, end, i.text);
+    }
+    Ok(vec![("code.bin", code.clone()), ("image.json", image.into_bytes()), ("code.listing.tsv", tsv.into_bytes())])
+}
+
 /// Assemble and link prog.asm in work; asm55 options extra. -> the linked executable.
 fn link(ti: &Path, dir: &Path, work: &Path, extra: &[&str]) -> Result<Vec<u8>, String> {
     fs::create_dir_all(work).map_err(|e| e.to_string())?;
@@ -141,11 +177,11 @@ fn link(ti: &Path, dir: &Path, work: &Path, extra: &[&str]) -> Result<Vec<u8>, S
     fs::read(work.join("prog.out")).map_err(|e| e.to_string())
 }
 
-/// (prog.lst, prog.hex, prog.sym) of a fixture as the tools make them now. The listing
-/// and the image come from a plain assembly (branch targets print as addresses, as in a
-/// runtime listing); the symbols, labels included, from a second one with
-/// --output_all_syms (the code is the same).
-fn build(ti: &Path, dir: &Path, work: &Path) -> Result<(String, String, String), String> {
+/// The generated files of a fixture as the tools make them now. The listing and the image
+/// come from a plain assembly (branch targets print as addresses, as in a runtime
+/// listing); the symbols, labels included, from a second one with --output_all_syms (the
+/// code is the same).
+fn build(ti: &Path, dir: &Path, work: &Path) -> Result<Vec<(&'static str, Vec<u8>)>, String> {
     let out = link(ti, dir, &work.join("plain"), &[])?;
     let lst = run(&ti.join("dis55"), &["-qq", "-r", "-g", "prog.out"], &work.join("plain"))?;
     let labeled = link(ti, dir, &work.join("labels"), &["--output_all_syms"])?;
@@ -153,7 +189,13 @@ fn build(ti: &Path, dir: &Path, work: &Path) -> Result<(String, String, String),
     if code != code_labeled {
         return Err("--output_all_syms changed the code".into());
     }
-    Ok((lst, write_image(&code), coff_symbols(&labeled)?))
+    let mut files = vec![("prog.hex", write_image(&code).into_bytes()),
+                         ("prog.sym", coff_symbols(&labeled)?.into_bytes())];
+    if has_option(dir, "run_inputs") {
+        files.extend(run_inputs(&lst, &code)?);
+    }
+    files.insert(0, ("prog.lst", lst.into_bytes()));
+    Ok(files)
 }
 
 fn ti_dir(arg: Option<String>) -> Result<PathBuf, String> {
@@ -188,11 +230,11 @@ fn main() {
     let mut failed = 0;
     for name in &names {
         let dir = root.join(name);
-        let result = build(&ti, &dir, &scratch.join(name)).and_then(|(lst, img, sym)| {
+        let result = build(&ti, &dir, &scratch.join(name)).and_then(|files| {
             let mut stale = Vec::new();
-            for (file, new) in [("prog.lst", lst), ("prog.hex", img), ("prog.sym", sym)] {
+            for (file, new) in files {
                 let path = dir.join(file);
-                if fs::read_to_string(&path).ok().as_deref() == Some(new.as_str()) {
+                if fs::read(&path).ok().as_deref() == Some(new.as_slice()) {
                     continue;
                 }
                 if mode == "write" {

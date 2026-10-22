@@ -9,7 +9,8 @@ systemd call at all).
 
 Every process these tests start is owned by the test and is cleaned up by
 exact handle or exact unit name; nothing broad is killed. Tests that build a
-Core need a guarded core: set ZEN_CORE_DIR to a directory holding it.
+core run the native runner c55x-run (C55X_RUN, default build/rust-target/release/
+c55x-run) on the probe of rust/fixtures/launcher; nothing here imports the emulator.
 """
 
 import argparse
@@ -58,9 +59,21 @@ HAVE_MANAGER = L.user_bus_env() is not None
 IN_JOB = "C55X_CONTAINED_JOB" in os.environ
 
 
-def have_guarded_core():
-    d = os.environ.get("ZEN_CORE_DIR")
-    return bool(d) and (pathlib.Path(d) / "c55x_core.so").exists()
+# The core runs as the native runner c55x-run (C55X_RUN, default: the release build of
+# scripts/cargo-test-contained's target dir) on the probe of rust/fixtures/launcher: a call
+# that stores 0x100 to output.pcm. Nothing here imports the emulator.
+RUNNER = pathlib.Path(os.environ.get("C55X_RUN") or ROOT / "build" / "rust-target" / "release" / "c55x-run")
+PROBE = ROOT / "rust" / "fixtures" / "launcher"
+
+
+def have_runner():
+    return RUNNER.is_file()
+
+
+def probe(out):
+    """The c55x-run command line of the probe, writing to the directory out."""
+    return [str(RUNNER), "--script", str(PROBE / "probe.call.json"), "--input", str(PROBE / "input.bin"),
+            "--out", str(out)]
 
 
 def launch(*args, cwd=ROOT, env=None, input=None, timeout=90):
@@ -375,54 +388,54 @@ class LauncherTests(unittest.TestCase):
 
     # ---- the core guard seen from the launcher --------------------------
 
-    @unittest.skipUnless(have_guarded_core(), "set ZEN_CORE_DIR to a guarded core build")
+    @unittest.skipUnless(have_runner(), "build c55x-run (or set C55X_RUN)")
     def test_work_class_job_cannot_construct_a_core(self):
-        code = ("from tests.test_c55x_emu_long_words import machine\n"
-                "try:\n    machine('nop')\nexcept Exception as e:\n    print(type(e).__name__, e)\n"
-                "else:\n    print('ADMITTED')\n")
-        r = launch("--job", "work", "--mem", "256M", "--wall-sec", "30", "--", PY, "-c", code)
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("ResourcePolicyError", r.stdout)
-        self.assertIn("may not run the emulator core", r.stdout)
+        TMP.mkdir(parents=True, exist_ok=True)
+        out = pathlib.Path(tempfile.mkdtemp(dir=TMP)) / "out"
+        r = launch("--job", "work", "--mem", "256M", "--wall-sec", "30", "--", *probe(out))
+        self.assertEqual(r.returncode, 3, r.stdout + r.stderr)       # c55x-run: refused
+        self.assertIn("may not run the emulator core", r.stderr)
+        self.assertFalse((out / "output.pcm").exists())
 
-    @unittest.skipUnless(have_guarded_core(), "set ZEN_CORE_DIR to a guarded core build")
+    @unittest.skipUnless(have_runner(), "build c55x-run (or set C55X_RUN)")
     def test_core_runs_in_a_slot_other_than_zero(self):
+        TMP.mkdir(parents=True, exist_ok=True)
+        out = pathlib.Path(tempfile.mkdtemp(dir=TMP)) / "out"
         first = subprocess.Popen([str(LAUNCHER), "--mem", "64M", "--wall-sec", "30", "--",
                                   "sleep", "10"], cwd=ROOT, env=ONE_SLOT)
         try:
             self.assertTrue(wait_until(unit_active, 15))
-            code = ("import pathlib\n"
+            code = ("import pathlib, subprocess, sys\n"
                     "rel=[l for l in open('/proc/self/cgroup') if l.startswith('0::')][0][3:].strip()\n"
-                    "from tests.test_c55x_emu_long_words import machine, run\n"
-                    "cpu, _ = machine('AC0 = #0x100')\nrun(cpu)\n"
-                    "print(pathlib.PurePath(rel).name, hex(cpu.ac[0]))\n")
-            r = launch("--mem", "256M", "--wall-sec", "30", "--", PY, "-c", code, env=TWO_SLOTS)
+                    "subprocess.run(sys.argv[1:], check=True)\n"
+                    "pcm=(pathlib.Path(sys.argv[-1]) / 'output.pcm').read_bytes()\n"
+                    "print(pathlib.PurePath(rel).name, pcm.hex())\n")
+            r = launch("--mem", "256M", "--wall-sec", "30", "--", PY, "-c", code, *probe(out), env=TWO_SLOTS)
         finally:
             first.wait(timeout=40)
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(r.stdout.split(), ["c55x-emu-1.service", "0x100"])
+        self.assertEqual(r.stdout.split(), ["c55x-emu-1.service", "0001"])      # 0x100, s16le
 
-    @unittest.skipUnless(have_guarded_core(), "set ZEN_CORE_DIR to a guarded core build")
+    @unittest.skipUnless(have_runner(), "build c55x-run (or set C55X_RUN)")
     def test_similarly_named_group_outside_the_shared_slice_is_refused(self):
+        TMP.mkdir(parents=True, exist_ok=True)
+        out = pathlib.Path(tempfile.mkdtemp(dir=TMP)) / "out"
         unit = "c55xfake-%s.service" % uuid.uuid4().hex[:8]
-        code = ("from tests.test_c55x_emu_long_words import machine\n"
-                "try:\n    machine('nop')\nexcept Exception as e:\n    print(type(e).__name__, e)\n"
-                "else:\n    print('ADMITTED')\n")
         cmd = ["systemd-run", "--user", "--wait", "--pipe", "--quiet", "--collect",
                "--expand-environment=no", "--slice=c55xfake.slice", "--unit=" + unit,
                "--working-directory", str(ROOT),
                "-p", "MemoryMax=128M", "-p", "MemorySwapMax=0", "-p", "TasksMax=16",
                "-p", "LimitCPU=300", "-p", "LimitNOFILE=256", "-p", "LimitCORE=0",
                "-p", "LimitAS=2147483648", "-p", "RuntimeMaxSec=60",
-               "--setenv=C55X_CONTAINED_JOB=emulator", "--setenv=ZEN_CORE_DIR",
-               "--setenv=PYTHONPATH=" + str(ROOT), "--", PY, "-c", code]
+               "--setenv=C55X_CONTAINED_JOB=emulator", "--", *probe(out)]
         try:
             r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
         finally:
             subprocess.run(["systemctl", "--user", "stop", unit, "c55xfake.slice"],
                            capture_output=True)                    # our exact fake units
-        self.assertIn("ResourcePolicyError", r.stdout, r.stdout + r.stderr)
-        self.assertNotIn("ADMITTED", r.stdout)
+        self.assertEqual(r.returncode, 3, r.stdout + r.stderr)       # c55x-run: refused
+        self.assertIn("refused outside the managed containment", r.stderr)
+        self.assertFalse((out / "output.pcm").exists())
 
 
 class MockedLauncherTests(unittest.TestCase):

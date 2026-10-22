@@ -1,0 +1,1 @@
+{"format": "c55x-memory-image/1", "size_bytes": 16777216, "snapshot_sha256": "215b32efab3596bfcdd191060be01cfdd0c18e25a1f1d2be27b93a7f1321e1c1", "segments": [{"file": "code.bin", "byte_address": 131072, "bytes": 9, "sha256": "acc0d1dce69eae1acef60243e3080a53dffacbb216b2116cc0e5a18c17e5920b"}]}
