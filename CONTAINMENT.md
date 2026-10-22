@@ -1,6 +1,6 @@
 # Resource containment
 
-The emulator can use a lot of memory (a `Machine` is a 16 MiB bus plus decoder
+The emulator can use a lot of memory (a core is 16 MiB of memory plus decoder
 state, test suites build hundreds of them) and heavy builds add more. To keep
 concurrent work from exhausting the host, emulator runs are placed in a
 kernel-enforced cgroup and the native core refuses to run outside it.
@@ -12,13 +12,14 @@ kernel-enforced cgroup and the native core refuses to run outside it.
     bin/c55x-contained --status
 
 Options, exit codes and the do/do-not list are in
-`.claude/skills/c55x-contained/SKILL.md`. `build/py/c55x_core.so` is the guarded
-reference core (`ORACLE_V2.md`). To try a new core build without touching it:
+`.claude/skills/c55x-contained/SKILL.md`. `build/run/c55x-run` is the guarded
+reference runner (`ORACLE_V2.md`). To try a new build without touching it:
 
-    CARGO_TARGET_DIR=$PWD/build/candidate-rust cargo build --release \
-        --manifest-path rust/Cargo.toml -p c55x_py
-    mkdir -p build/candidate && cp build/candidate-rust/release/libc55x_py.so build/candidate/c55x_core.so
-    ZEN_CORE_DIR=$PWD/build/candidate bin/c55x-contained -- python3 -m unittest discover -s tests -t .
+    RUSTC_WRAPPER= CARGO_BUILD_JOBS=1 CARGO_TARGET_DIR=$PWD/build/candidate-rust \
+        bin/c55x-contained --job work --env RUSTC_WRAPPER --env CARGO_BUILD_JOBS \
+        --env CARGO_TARGET_DIR -- cargo build --release --manifest-path rust/Cargo.toml -p c55x_run
+    bin/c55x-contained -- build/candidate-rust/release/c55x-run --script S.json --out DIR
+    CARGO_TARGET_DIR=$PWD/build/candidate-rust scripts/cargo-test-contained
 
 ## Policy
 
@@ -60,14 +61,15 @@ single-slot values (4 GiB, 3 GiB, 64 tasks, 200% CPU) and accepts only
    `.../c55x.slice/<slot unit>` (exactly one of the eight slot unit names),
    and checks job and shared-group memory, swap, tasks, CPU,
    `memory.oom.group` and the process rlimits. Failure raises
-   `c55x_core.ResourcePolicyError`. Single-step calls re-check at most every
+   a "resource policy" error (`Error::Policy`; c55x-run reports it as
+   `ResourcePolicyError`). Single-step calls re-check at most every
    50 ms (a full check costs ~120 us and would slow stepping 25x).
-3. Emulator-level caps, independent of the cgroup: program image and `Bus`
+3. Emulator-level caps, independent of the cgroup: program image and memory
    loads <= 16 MiB (24-bit program space); decoded-instruction cache <= 1 Mi
    entries (engineering limit, not architectural); `set_trace` <= 4 Mi pcs;
    buffered audio <= 16 Mi samples (an explicit error instead of silent
-   growth). `Machine.image_info` / `resource_report()` report the loaded image
-   (name, size, sections, sha256) and cache size.
+   growth). c55x-run checks every image segment (address, size, sha256) and
+   reports them in its run.
 
 ## Tests
 
@@ -76,7 +78,7 @@ single-slot values (4 GiB, 3 GiB, 64 tasks, 200% CPU) and accepts only
 | Core guard, outside a job (must refuse) | after `scripts/cargo-test-contained`: the containment binary of `build/rust-target/test-binaries.txt` with `--ignored outside`, run without the launcher |
 | Core guard, inside a job (kernel readback, live revalidation, trace cap) | `scripts/cargo-test-contained` (rust/c55x_core/tests/containment.rs) |
 | Rust tests (dropped cores free their memory: tests/lifecycle.rs) | `scripts/cargo-test-contained` |
-| Launcher (real kernel, tiny budgets; run outside a job) | `ZEN_CORE_DIR=<dir> python3 -m unittest tests.test_c55x_launcher` |
+| Launcher (real kernel, tiny budgets; run outside a job) | `C55X_RUN=<c55x-run> python3 -m unittest tests.test_c55x_launcher` |
 | Pure policy logic (fake trees) | `scripts/cargo-test-contained` (the unit tests of rust/c55x_core/src/policy.rs) |
 | Emulator caps (memory, loads, code cache; image size in c55x-run) | `scripts/cargo-test-contained` (rust/c55x_core/tests/resource_caps.rs, rust/c55x_run/tests/cli.rs) |
 

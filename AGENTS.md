@@ -1,14 +1,43 @@
 # Instructions for coding agents
 
+## Single source of truth: Rust
+
+This repository is a pure C55x emulator. Rust is the single source of truth for
+everything the emulator does:
+
+| Concern | Single source of truth | Not allowed |
+|---|---|---|
+| Instruction semantics | `rust/c55x_core` (expr, fast, fuse, parts, stmt, dsp) | semantics in any other language |
+| dis55 text to instruction IR | `rust/c55x_core/src/frontend` | a second parser (the Python one is at tag `python-slow-path-final`) |
+| Listing parsing | `c55x_core::frontend::listing` | a parser outside the core |
+| Memory, state, interrupts, DMA, McBSP | `c55x_core` | board or peripheral models (removed; at the tag) |
+| Running a program | `rust/c55x_run` (`c55x-run`) over `Core::from_listing` (memory image + listing) | decoding at run time, a host trait or callbacks into Python |
+| Tests | `cargo test` via `scripts/cargo-test-contained` (`rust/c55x_core/tests`, `rust/c55x_run/tests`, `rust/fixtures`) | Python tests for the emulator |
+| Containment | `bin/c55x-contained` + `rust/c55x_core/src/policy.rs` / `guard.rs` | a payload that runs the core other than through a Rust binary |
+
+- Never bind the core back to Python. Do not add a Python host, a Python
+  callback or a Python dependency to `c55x_core`.
+- `rust/c55x_core/tests/ssot_guards.rs` enforces this: the core depends on
+  `regex` only, no host trait, no pyo3 in the workspace, no Python file besides
+  the launcher exception. Do not weaken it or allowlist around it without the
+  owner's approval.
+- The Python binding (`rust/c55x_py`, `c55x_emu/`) was removed. The last state
+  with it is the tag `python-slow-path-final`; its extension
+  (`build/archive-python/c55x_core.so`) is a frozen reference for external
+  Python harnesses only.
+- The one explicit Python exception is the launcher `bin/c55x-contained` with its
+  tests (`tests/test_c55x_launcher.py`). It is machine-safety infrastructure,
+  not the emulator, and uses the Python standard library only.
+
 ## Run everything through the launcher
 
-Anything that loads the emulator core (tests, probes, `python -m c55x_emu`,
-scripts that import `c55x_emu`) and any heavy build step must run through
-`bin/c55x-contained`. The native core refuses to run outside it and raises
-`ResourcePolicyError`. Do not look for a way around that check.
+Anything that loads the emulator core (`c55x-run`, the Rust test binaries) and
+any heavy build step must run through
+`bin/c55x-contained`. The native core refuses to run outside it with a
+"resource policy" error (`ResourcePolicyError` in a c55x-run report). Do not look for a way around that check.
 
-    bin/c55x-contained -- python3 -m unittest discover -s tests -t .
-    bin/c55x-contained -- python3 my_probe.py ARGS...
+    scripts/cargo-test-contained                          # Rust tests (work job + emulator job)
+    bin/c55x-contained -- build/run/c55x-run --script S.json --input FILE --out DIR
     bin/c55x-contained --job work -- ./rust/build.sh      # builds, cannot run the core
     bin/c55x-contained --status
 
@@ -26,12 +55,15 @@ exit-code table: `CONTAINMENT.md`.
 
 ## The reference core
 
-`build/py/c55x_core.so` is the reference core: the Python extension built from
-the Cargo workspace `rust/` (`c55x_core`: the core itself, no Python;
-`c55x_py`: the extension module `c55x_core`; `c55x_run`: the host without
-Python). Build it only with `rust/build.sh` from a clean commit and confirm its SHA256 against
-`ORACLE_V2.md`. Do not replace it, copy another `c55x_core.so` over it, or
-point `ZEN_CORE_DIR` at a core of unknown origin. Moving any pin to a new core
+The reference build is the native runner `build/run/c55x-run`, built from the
+Cargo workspace `rust/`:
+
+- `c55x_core`: the core itself, no Python;
+- `c55x_run`: the call-script runner;
+- `c55x_fixtures`: rebuilds and checks the test fixtures.
+
+Build it only with `rust/build.sh` from a clean commit, and confirm its SHA256
+against `ORACLE_V2.md`. Do not replace it or copy another build over it. Moving any pin to a new core
 build needs explicit confirmation from the repository owner.
 
 Earlier reference builds (their SHA256 values are in `ORACLE_V2.md`) may be kept
@@ -42,8 +74,11 @@ work. The behavior differences between builds are listed in `CHANGELOG.md`.
 
 ## Tests
 
-Run the full suite inside the launcher. Two example tests (`hello_mcu`) fail
-until the example programs are built with the TI tools; that is expected.
+Run the Rust tests with `scripts/cargo-test-contained`. The script builds them
+in a work job and runs them in one emulator job. The launcher tests run outside
+a job: `python3 -m unittest tests.test_c55x_launcher` (`C55X_RUN` names the
+c55x-run binary). Test programs are synthetic fixtures under `rust/fixtures`;
+never use firmware code, addresses or symbols in a test.
 
 ## Looking up instruction behavior
 

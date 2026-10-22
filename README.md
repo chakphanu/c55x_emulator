@@ -1,109 +1,110 @@
 # c55x_emulator
 
-Emulator for the TI TMS320C55x DSP of the Zen Touch player (Jukebox2): a Python machine
-model (`c55x_emu/`) on a Rust CPU core (`rust/c55x_core`, loaded as the extension
-`rust/c55x_py`), with models for the ATA disk,
-NOR flash, LCD, audio codec, MCU and USB/MTP. It ships no firmware and no vendor code:
-you supply your own updater EXE.
+An emulator of the TI TMS320C55x DSP CPU. It provides the CPU, the on-chip DMA
+controller and McBSP. There is no board: an emulated program sees memory, the CPU
+registers, DMA and McBSP. Any other I/O port, a data write into decoded code and
+the `idle` instruction are errors.
 
-On my hardware (AMD Ryzen AI 7 PRO 360 w/ Radeon 880M) the emulator runs the original firmware in real time (the debug
-tab shows `Speed: 1.00 x real time`). Other machines are not measured.
+The emulator is written in Rust and is the single source of truth for every
+instruction (`rust/c55x_core`). A program runs from a memory image and a precomputed
+`dis55` listing; nothing is decoded at run time. The repository holds no firmware
+and no vendor code. Its test programs are small synthetic sources assembled with
+the TI tools.
+
+The Zen Touch board models, the Python machine, its GUI and the Python binding
+were removed. The last state with them is the tag `python-slow-path-final`
+(branch `archive/python-slow-path`).
 
 ## Requirements
 
-- Python 3.10+ and [uv](https://docs.astral.sh/uv/) (PyQt5 only for the GUI), a Rust toolchain (cargo)
-- TI C55x code generation tools 4.4.1 (`cl55`, `asm55`, `lnk55`, `dis55`), which are not
-  redistributable. Put them in your `PATH` (e.g. `~/.local/bin`), or set `ZEN_TI_BIN` to their `bin`
-  directory.
+- A Rust toolchain (cargo).
+- Linux with cgroup v2 and systemd user services, for the launcher
+  `bin/c55x-contained` (Python 3 standard library only).
+- Only to rebuild the test fixtures: TI C55x code generation tools 4.4.1
+  (`asm55`, `lnk55`, `dis55`). They are not redistributable. Put them in your
+  `PATH`, or set `C55X_TI_BIN` to their `bin` directory.
 
-## Build
+## Containment
 
-Run everything from the repository root; all data paths hang off it (`ZEN_ROOT` overrides).
+The core refuses to run outside the launcher. Builds run as work jobs, and
+anything that runs the core runs as an emulator job. See `CONTAINMENT.md`
+(agents: `AGENTS.md`).
 
-    bin/c55x-contained --job work -- rust/build.sh   # builds build/py/c55x_core.so
-    python3 -m unittest discover -s tests -t .
+    RUSTC_WRAPPER= CARGO_BUILD_JOBS=1 bin/c55x-contained --job work \
+        --env RUSTC_WRAPPER --env CARGO_BUILD_JOBS -- ./rust/build.sh
+    bin/c55x-contained --status
 
-Runs that load the core must go through `bin/c55x-contained` (see
-`CONTAINMENT.md`; agents: `AGENTS.md`). Behavior changes of the core, with the
-manual each one follows: `CHANGELOG.md`; the reference core build:
+`rust/build.sh` builds the runner and places it in `build/run/c55x-run`. The
+reference build and its SHA256 are listed in `ORACLE_V2.md`.
+
+## Run a program: c55x-run
+
+    bin/c55x-contained -- build/run/c55x-run --script S.json --input FILE --out DIR
+
+- `--script` names a call script (format `c55x-call-script/1`, JSON). It
+  contains:
+  - the memory image (`c55x-memory-image/1`: segment files with byte address,
+    size and SHA256);
+  - the listing (`dis55 -qq -r -g` of the loaded code);
+  - the initial CPU state;
+  - the calls to make.
+- A call gives the entry, the registers it sets, the memory it writes before the
+  call and the memory it reads afterwards. Registers a call does not set carry
+  over from the previous call.
+- A record loop runs a list of steps for every record of `--input` and appends
+  what the steps read to the output.
+- `--out` receives `output.pcm`, the appended output, and `run.json` (format
+  `c55x-cli-run/1`). `run.json` holds every call's status, instruction count
+  and cycles, and the hash of the output.
+- The format details are in the header of `rust/c55x_run/src/main.rs`.
+
+## Tests
+
+    scripts/cargo-test-contained
+
+The script builds the test binaries in a work job and runs them in one emulator
+job. The tests are:
+
+- the core's inline tests;
+- the integration tests in `rust/c55x_core/tests`, one file per area: semantics,
+  addressing, ACOV, MAC, long words, DSP, interrupts, DMA, McBSP, the manual
+  review, oracle v2, lifecycle and containment;
+- the SSOT guards, `rust/c55x_core/tests/ssot_guards.rs`.
+
+Each test runs a snippet of a fixture program from `rust/fixtures/NAME`:
+
+| File | Content |
+|---|---|
+| `prog.asm` | hand-written source |
+| `prog.lst` | runtime listing |
+| `prog.hex` | loaded sections |
+| `prog.sym` | labels, used as entry points |
+
+Expected values sit in the test or in a frozen `.tsv` with its origin. Rebuild
+or check the fixtures with the TI tools:
+
+    bin/c55x-contained --job work -- cargo run --release \
+        --manifest-path rust/Cargo.toml -p c55x_fixtures -- check
+
+Behavior changes of the core, with the manual section each one follows and its
+evidence level: `CHANGELOG.md`. The reference builds and their SHA256 values:
 `ORACLE_V2.md`.
-
-## Run the examples
-
-`examples/` has three small programs that run on the bare emulated hardware:
-`hello_lcd` (text on the LCD), `hello_mcu` (MCU protocol and key events) and
-`hello_audio` (a tone through the codec).
-
-    scripts/run_example.sh hello_lcd --ascii
-    scripts/run_example.sh hello_mcu --event 0x11 --ascii
-    scripts/run_example.sh hello_audio --seconds 2 --wav tone.wav
-
-The script builds the example (`examples/build.sh NAME`, output in `build/examples/`) and
-starts `python3 -m c55x_emu` with your options. `--help` lists them all (`--png FILE`,
-`--steps N`, `--seconds S`, `--trace N`, `--disk FILE`, `--mcu-reg R=V`, `--wav FILE`).
-
-## Run the original firmware from your own updater
-
-Needs the firmware container tools from
-[zentouch-reverse-engineering](https://github.com/debauer/zentouch-reverse-engineering)
-(clone it next to this repo as `../public`, or set `ZEN_TOOLS`). The tools need the three
-public firmware keys from the Rockbox source tree; they are not part of either repo:
-export `ZEN_TL_KEY`, `ZEN_FRESC_KEY` and `ZEN_SIGNING_KEY` first (see `docs/tools.md`,
-section Keys, in that repo).
-
-The updater EXE is available from
-https://github.com/brianpipa/CreativeZen/tree/main/CreativeZenTouch.
-
-    export ZEN_TL_KEY='...' ZEN_FRESC_KEY='...' ZEN_SIGNING_KEY='...'
-    scripts/prepare_firmware.sh ZenTouchP4S_PCFW_LF_2_10_05.exe firmware-work
-    scripts/run_firmware.sh firmware-work --seconds 5 --png lcd.png
-
-`prepare_firmware.sh` extracts the updater, decrypts the Jukebox2 program, writes its code
-blocks at their CPU addresses and disassembles them with `dis55` (listing for the
-emulator). Everything lands in the work directory, which `run_firmware.sh` uses as
-`ZEN_ROOT`. Only version 2.10.05 (`ZenTouchP4S_PCFW_LF_2_10_05.exe`) is tested; other
-versions have other addresses and need changes in `c55x_emu/loader.py`. Keep the work
-directory private: it contains the firmware.
-
-`--disk FILE` attaches a disk image (a missing file is created as a synthetic one).
-Without symbols from a reverse engineering project, reports show addresses instead of
-function names.
-
-## Graphical front end
-
-Needs PyQt5, which `uv` installs from `pyproject.toml` (extra `gui`). Same image argument
-as the headless entry:
-
-    uv run --extra gui c55x-emu-gui build/examples/hello_lcd/hello_lcd.out
-    ZEN_ROOT=$PWD/firmware-work uv run --extra gui c55x-emu-gui jukebox2 --disk zen.img
-
-Options: `--disk FILE`, `--mute` (no live audio), `--scale N` (LCD zoom). Run it from the
-repository root; `jukebox2` needs a prepared firmware (see above). The headless parts
-need no Python packages; `uv run c55x-emu IMAGE` is the headless entry (same as
-`python3 -m c55x_emu`). Without uv: `pip install PyQt5` and call `python3 -m ...`.
-
-Player tab (LCD and keys) and debug tab (events, MCU registers and traffic):
-
-![Player tab](screens/player.jpg)
-
-![Debug tab](screens/debug.jpg)
 
 ## Environment variables
 
 | Variable | Meaning |
 | --- | --- |
-| `ZEN_ROOT` | working tree with `output/`, `analysis/`, `build/` (see `c55x_emu/paths.py`) |
-| `ZEN_TI_BIN` | TI C55x tools directory |
-| `ZEN_CORE_DIR` | directory with `c55x_core.so` (default `build/py`) |
-| `ZEN_TOOLS` | checkout of zentouch-reverse-engineering (for `prepare_firmware.sh`) |
-| `ZEN_TL_KEY`, `ZEN_FRESC_KEY`, `ZEN_SIGNING_KEY` | firmware keys for `prepare_firmware.sh` (public Rockbox keys) |
+| `C55X_TI_BIN` | TI C55x tools directory (fixtures only) |
+| `C55X_RUN` | the c55x-run binary used by the launcher tests (default `build/rust-target/release/c55x-run`) |
 
 ## Layout
 
-- `c55x_emu/`: emulator package, `python3 -m c55x_emu IMAGE` is the headless entry
-- `rust/`: CPU core and peripherals (Python extension)
-- `examples/`: example programs and their minimal hardware headers
-- `tools/`: `make_listing.py` (code blocks to listing), `roundtrip_c55x_asm.py`
-  (disassembly that reassembles to identical bytes), `c55x_listing.py`
-- `scripts/`: the shell scripts above
-- `tests/`: unit tests
+- `rust/c55x_core/`: the CPU core, with no dependency but `regex`. It contains
+  instruction semantics, the dis55-text frontend (`src/frontend`), DMA, McBSP,
+  the containment guard and `Core::from_listing` (memory image + listing).
+- `rust/c55x_run/`: `c55x-run`, the call-script runner.
+- `rust/c55x_fixtures/`: `c55x-fixtures`, which rebuilds or checks `rust/fixtures`.
+- `bin/c55x-contained`: the launcher (resource containment).
+- `scripts/cargo-test-contained`: build and run the Rust tests under the launcher.
+- `rust/build.sh`: builds `build/run/c55x-run`.
+- `tests/`: the launcher tests (Python standard library, the one Python part).

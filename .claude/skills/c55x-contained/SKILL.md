@@ -1,6 +1,6 @@
 ---
 name: c55x-contained
-description: Use BEFORE running anything that loads the C55x emulator core (python -m c55x_emu, the test suite, probes, scripts that import c55x_emu or c55x_core) or any heavy build step (cargo, sanitizer runs, large exports). Every such run must go through bin/c55x-contained, which places it in a memory-, CPU- and time-bounded cgroup. The native core refuses to run outside that cgroup.
+description: Use BEFORE running anything that loads the C55x emulator core (c55x-run, the Rust test binaries, probes) or any heavy build step (cargo, sanitizer runs, large exports). Every such run must go through bin/c55x-contained, which places it in a memory-, CPU- and time-bounded cgroup. The native core refuses to run outside that cgroup.
 ---
 
 # Running the emulator under resource containment
@@ -14,15 +14,15 @@ Run every emulator payload, test run, probe and heavy build through
 
 The native core (`c55x_core`) checks the cgroup hierarchy and process limits
 when a `Core` is constructed and again at execution entries (`run`, `step`,
-`call`, `ret`, `advance`, `ata_io`). Outside the managed cgroup it raises
-`c55x_core.ResourcePolicyError`. There is no flag or environment variable to
+`call`, `ret`, `advance`). Outside the managed cgroup it fails with a
+resource-policy error. There is no flag or environment variable to
 skip the check, so do not look for one.
 
 ## Commands
 
-    bin/c55x-contained -- python3 -m unittest discover -s tests -t .
-    bin/c55x-contained -- python3 -m c55x_emu ARGS...
-    bin/c55x-contained -- python3 my_probe.py --flag "literal arg"
+    scripts/cargo-test-contained                  # the Rust tests (work job + emulator job)
+    bin/c55x-contained -- build/run/c55x-run --script S.json --input FILE --out DIR
+    bin/c55x-contained -- ./my_probe --flag "literal arg"
 
 Compilers, sanitizer runs and other heavy non-emulator work (cannot build a
 `Core`; may run next to an emulator job):
@@ -95,18 +95,18 @@ outcome prints one line on stderr starting with `c55x-contained: outcome=`.
 
 ## Do not
 
-- Import `c55x_emu` / `c55x_core` or run the tests outside the launcher.
+- Run c55x-run or the Rust test binaries outside the launcher.
 - Edit cgroup files, the `c55x.slice` properties or the job unit, or move
   processes between cgroups.
 - Stop, kill or `reset-failed` another job's unit, or delete its lock.
 - Point `--work-dir`, `TMPDIR` or build outputs at `/tmp`, `/dev/shm` or any
   other tmpfs.
-- Replace the reference core `build/py/c55x_core.so` (the guarded build listed in
+- Replace the reference runner `build/run/c55x-run` (the guarded build listed in
   `ORACLE_V2.md`), or use `build/afce/` (the older build without the guard, kept for
-  regression comparison only). A new core build goes to its own output directory (`CARGO_TARGET_DIR=build/candidate-rust cargo
-  build --release --manifest-path rust/Cargo.toml -p c55x_py`, copy `libc55x_py.so` to
-  `<dir>/c55x_core.so`, then use it with `ZEN_CORE_DIR=<dir>`). Moving
-  downstream pins to a new core needs explicit owner confirmation.
+  regression comparison only). A new build goes to its own output directory
+  (`CARGO_TARGET_DIR=build/candidate-rust cargo build --release --manifest-path
+  rust/Cargo.toml -p c55x_run`, in a work job). Moving downstream pins to a new
+  build needs explicit owner confirmation.
 
 ## Trust boundary and limits
 

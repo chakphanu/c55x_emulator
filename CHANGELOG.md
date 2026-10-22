@@ -1,7 +1,7 @@
 # Changelog
 
-Guest-visible behavior changes of the CPU core (`rust/c55x_core`; Python extension
-`rust/c55x_py`), newest first.
+Guest-visible behavior changes of the CPU core (`rust/c55x_core`; native runner
+`rust/c55x_run`, earlier also the Python extension `rust/c55x_py`), newest first.
 Every entry gives the observable change, the manual it follows, the evidence level,
 the test that pins it and the commit.
 
@@ -17,6 +17,22 @@ instruction set), SPRU371F (C55x CPU reference) and the C55x v3.x CPU reference
 guide. Instruction spellings in the tests were checked by assembling them with
 `asm55` and reading them back with `dis55 -r -g`. Citations give section numbers
 only.
+
+## 2026-10-23: a pure C55x emulator without Python
+
+No guest behavior change.
+
+- Removed: the Zen Touch board models and tooling, the ATA disk and the
+  Jukebox2 idle shortcuts in the core, the Python binding `rust/c55x_py` and
+  the package `c55x_emu`.
+- Every test is Rust (`scripts/cargo-test-contained`). The launcher and its
+  tests are the one Python part.
+- `rust/build.sh` builds the reference runner `build/run/c55x-run`.
+- `rust/c55x_core/tests/ssot_guards.rs` keeps the workspace free of Python; the
+  core has no host trait (`Core::from_listing`).
+- Gates for the removal: c55x-run on a private 104-file decode set (PCM and
+  every per-call instruction count) and the 1617 routine vectors, both
+  identical to the archived reference.
 
 ## 2026-10-22: archive of the Python slow path
 

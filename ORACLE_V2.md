@@ -1,14 +1,16 @@
 # Oracle v2 build
 
-A build of this repository's core (`rust/c55x_core`, as the Python extension
-`rust/c55x_py`) for use as a differential
-oracle. The reference build it replaces is the `3dbef971e814e1e7...`
+A build of this repository's core (`rust/c55x_core`) for use as a differential
+oracle. Since the Python binding was removed (tag `python-slow-path-final` is the
+last state with it), the reference build is the native runner `c55x-run`
+(`rust/c55x_run`); the extension entries below are history. The reference build it replaces is the `3dbef971e814e1e7...`
 core (SQDST-corrected snapshot; this repository's `8871bc9` is
 byte-identical to its source).
 
 - Build: `RUSTC_WRAPPER= CARGO_BUILD_JOBS=1 bin/c55x-contained --job work
   --env RUSTC_WRAPPER --env CARGO_BUILD_JOBS -- ./rust/build.sh` ->
-  `build/py/c55x_core.so` (with two cargo jobs the linker can hit the job's
+  `build/run/c55x-run` (before the binding was removed: `build/py/c55x_core.so`;
+  with two cargo jobs the linker can hit the job's
   32-task limit: `posix_spawnp: Resource temporarily unavailable`)
 - SHA256 (current reference): extension
   9f9c5331c5d7843e69a7610ccffcabc8877c16a1286c384339cc71994d3e668a and native
