@@ -402,6 +402,11 @@ Infra decisions in detail:
    asm55 will not re-assemble. Each one is listed here with the reason.
 6. The Python-specific rejection text is replaced with a neutral Rust message when Python
    goes; the frozen tsv changes in that commit.
-7. Launcher tests: on hold until the owner decides whether bin/c55x-contained (Python)
-   stays as an exception.
+7. Launcher (owner decision): bin/c55x-contained and its 35 launcher tests stay Python as
+   an explicit exception. They are machine-safety infrastructure, not the emulator.
+   AGENTS.md records the exception when the Python emulator goes. Their payloads must not
+   import c55x_emu or the c55x_core Python module: the 3 core payloads
+   (test_work_class_job_cannot_construct_a_core, test_core_runs_in_a_slot_other_than_zero,
+   test_similarly_named_group_outside_the_shared_slice_is_refused) switch to a Rust
+   binary. Everything else becomes Rust.
 8. The fork is never pushed by agents; commits stay local.
