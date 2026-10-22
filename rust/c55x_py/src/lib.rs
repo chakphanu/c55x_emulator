@@ -2,6 +2,7 @@
 //! from build/py): the Core class over the Python host, its containment checks and the
 //! conversion of errors to Python exceptions.
 
+mod frontend;
 mod pyhost;
 mod sync;
 
@@ -232,5 +233,6 @@ fn c55x_core_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyCore>()?;
     m.add("ResourcePolicyError", m.py().get_type::<ResourcePolicyError>())?;
     m.add("VERSION", env!("CARGO_PKG_VERSION"))?;
+    frontend::register(m)?;
     Ok(())
 }

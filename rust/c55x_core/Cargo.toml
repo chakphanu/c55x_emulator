@@ -8,3 +8,4 @@ description = "TMS320C55x CPU core: semantics, instruction compiler and the host
 name = "c55x_core"
 
 [dependencies]
+regex = "=1.13.1"

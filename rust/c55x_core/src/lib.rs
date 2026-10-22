@@ -15,6 +15,7 @@ pub mod dsp;
 pub mod err;
 pub mod expr;
 pub mod fast;
+pub mod frontend;
 pub mod fuse;
 pub mod guard;
 pub mod host;
