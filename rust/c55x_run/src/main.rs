@@ -182,7 +182,7 @@ impl Runner {
                 return Err(("ValueError".into(), format!("no memory mark {:?}", n)));
             }
         }
-        self.core.trace = if trace > 0 { Some((trace, Default::default())) } else { None };
+        self.core.set_trace(trace).map_err(|e| ("ValueError".to_string(), core_error(e).1))?;
         let (native0, cycles0) = (self.core.native, self.core.st.cycles);
         let start = Instant::now();
         let mut budget = 0u64;
