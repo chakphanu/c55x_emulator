@@ -11,9 +11,22 @@ byte-identical to its source).
   `build/py/c55x_core.so` (with two cargo jobs the linker can hit the job's
   32-task limit: `posix_spawnp: Resource temporarily unavailable`)
 - SHA256 (current reference): extension
-  3539b077f9f46103aad16e56059de175b5fa2d84851d68b8e36829710cc5bf24 and native
+  9f9c5331c5d7843e69a7610ccffcabc8877c16a1286c384339cc71994d3e668a and native
   runner `build/run/c55x-run`
-  eb9eee5168578870c8bfbe3ac0bd372226cc098f5949f0b0e81ca22353be097d, both built
+  e24add9a72a38ecc41a2297d1557b01f7b649ef28706d6c78e921998fe172606, both built
+  from commit b91f15a (clean `git archive` export, same hashes as a separate
+  build; the later test-only commits do not change them). Relative to the
+  previous reference it adds the containment check at the core's execution
+  entries, resource caps in the core (trace length, image size, cached
+  instructions, bounded `load_bytes`), whole-memory slices and the version-2
+  call script (`restore_image`, `mark_memory`, `observe`). Acceptance: the
+  private 104-file decode set unchanged (PCM and per-call instruction counts),
+  and the 1617 routine vectors run through `c55x-run` equal to the recorded
+  observations on every component (status, instructions, cycles, registers,
+  memory windows, outside writes, trace, ACOV).
+- SHA256 of the previous reference: extension
+  3539b077f9f46103aad16e56059de175b5fa2d84851d68b8e36829710cc5bf24 and native
+  runner eb9eee5168578870c8bfbe3ac0bd372226cc098f5949f0b0e81ca22353be097d, both built
   from commit ce124e4 (clean `git archive` export; the runner with
   `cargo build --release -p c55x_run`, same hash from two target directories).
   ce124e4 adds the Python-free native host (`NativeHost::from_listing`: memory
