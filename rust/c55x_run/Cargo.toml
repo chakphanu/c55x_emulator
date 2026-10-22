@@ -2,7 +2,7 @@
 name = "c55x_run"
 version = "0.1.0"
 edition = "2021"
-description = "Command-line host for the core without Python (placeholder)"
+description = "Command-line host for the core without Python: runs a call script over a memory image and a listing"
 
 [[bin]]
 name = "c55x-run"
@@ -10,3 +10,5 @@ path = "src/main.rs"
 
 [dependencies]
 c55x_core = { path = "../c55x_core" }
+serde_json = "1"
+sha2 = "0.10"
