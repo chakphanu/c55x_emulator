@@ -37,7 +37,7 @@ pub struct Compiled {
 
 pub struct Core {
     pub st: State,
-    pub ovf_pending: bool, // a Tx shift count saturated during this read phase (SPRU374E 4.70.3)
+    pub ovf_pending: bool, // overflow detected while reading the current part (SPRU374E 4.27, 4.70.3)
     pub(crate) mem: *mut u8,
     _mem_obj: Py<PyByteArray>,
     pub cpu: Py<PyAny>,

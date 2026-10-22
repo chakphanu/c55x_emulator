@@ -21,9 +21,6 @@ fn store_fx(d: Expr) -> Store {
     match d {
         Expr::Reg(Reg::Ac(i), _) => Box::new(move |m, v| {
             m.st.ac[i as usize] = (v & AC_MASK as i128) as u64;
-            // SPRU374E 4.70.3: a saturated Tx shift count reports overflow on the
-            // destination accumulator.
-            if std::mem::take(&mut m.ovf_pending) { m.st.acov[i as usize] = 1; }
             Ok(())
         }),
         Expr::Reg(r, _) => Box::new(move |m, v| { m.st.set(r, v); Ok(()) }),
@@ -48,10 +45,18 @@ pub struct Assign {
     unary_carry: Option<bool>, // Some(true): accumulator; Some(false): 16-bit ALU
     logical_carry: Option<Fx>,
     test: bool,
+    acov: Option<usize>,       // destination accumulator: reports this assignment's overflow
 }
 
 impl Assign {
     pub fn new(dst: Expr, src: Expr) -> Assign {
+        // SPRU374E 4.27: an overflow sets the status bit of the destination accumulator
+        // only; other destinations (memory, MMR, T / AR) report none (4.6.x).
+        let acov = match &dst {
+            Expr::Reg(Reg::Ac(i), _) => Some(*i as usize),
+            Expr::Half(x, _) => match x.as_ref() { Expr::Reg(Reg::Ac(i), _) => Some(*i as usize), _ => None },
+            _ => None,
+        };
         let register_alu = matches!(&dst, Expr::Reg(Reg::Ac(_) | Reg::T(_) | Reg::Ar(_), _));
         let carry = register_alu && matches!(src, Expr::AddSub { product: false, .. });
         let test = matches!(dst, Expr::Reg(Reg::Tc1, _) | Expr::Reg(Reg::Tc2, _));
@@ -124,12 +129,14 @@ impl Assign {
             }
             _ => arith_fx(&src, false, true, false),
         };
-        Assign { fx, src, store: store_fx(dst), sat, sat_a, carry, unary_carry, logical_carry, test }
+        Assign { fx, src, store: store_fx(dst), sat, sat_a, carry, unary_carry, logical_carry, test, acov }
     }
 
-    /// Read phase: (value, CARRY result if the assignment sets it).
+    /// Read phase: (value, CARRY result if the assignment sets it, overflow detected
+    /// while reading this assignment alone).
     #[inline]
-    pub fn read(&self, m: &mut Core) -> R<(i128, Option<u8>)> {
+    pub fn read(&self, m: &mut Core) -> R<(i128, Option<u8>, bool)> {
+        m.ovf_pending = false;
         let v = (self.fx)(m)?;
         let v = if self.test { (v != 0) as i128 } else { v };
         let carry = if let Some(carry) = &self.logical_carry {
@@ -145,22 +152,23 @@ impl Assign {
             v.clamp(-32768, 32767)
         } else { v };
         let v = if self.sat { saturate_acc(m, v) } else { v };
-        Ok((v, carry))
+        Ok((v, carry, std::mem::take(&mut m.ovf_pending)))
     }
 
     /// Commit phase.
     #[inline]
-    pub fn commit(&self, m: &mut Core, v: i128, carry: Option<u8>) -> R<()> {
+    pub fn commit(&self, m: &mut Core, v: i128, carry: Option<u8>, ovf: bool) -> R<()> {
         (self.store)(m, v)?;
         if let Some(c) = carry { m.st.carry = c as u32 }
+        if ovf { if let Some(i) = self.acov { m.st.acov[i] = 1 } }
         Ok(())
     }
 
     /// The assignment as a whole instruction.
     pub fn run(self) -> Run {
         Box::new(move |m| {
-            let (v, c) = self.read(m)?;
-            self.commit(m, v, c)
+            let (v, c, o) = self.read(m)?;
+            self.commit(m, v, c, o)
         })
     }
 }
@@ -176,12 +184,12 @@ pub fn run_all(mut list: Vec<(bool, Assign)>) -> Run {
     }
     Box::new(move |m| {
         for phase_first in [true, false] {
-            let (mut vs, mut cs) = ([0i128; 4], [None; 4]);
+            let (mut vs, mut cs, mut os) = ([0i128; 4], [None; 4], [false; 4]);
             for (k, (first, a)) in list.iter().enumerate() {
-                if *first == phase_first { (vs[k], cs[k]) = a.read(m)?; }
+                if *first == phase_first { (vs[k], cs[k], os[k]) = a.read(m)?; }
             }
             for (k, (first, a)) in list.iter().enumerate() {
-                if *first == phase_first { a.commit(m, vs[k], cs[k])?; }
+                if *first == phase_first { a.commit(m, vs[k], cs[k], os[k])?; }
             }
         }
         Ok(())

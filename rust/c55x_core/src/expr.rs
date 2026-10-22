@@ -93,8 +93,8 @@ pub fn satd(m: &Core) -> bool { m.st.st1 & ST1_SATD != 0 }
 /// working width (32 or 40 bits; SXMD substitutes the guard bits by
 /// sign-extending from bit 31), the result is confined to the same width,
 /// a result outside the width reports a destination overflow (the pending
-/// flag is latched into ACOV at the store), and SATD saturates it to the
-/// width's extreme values.
+/// flag is latched into ACOV when the assignment commits), and SATD
+/// saturates it to the width's extreme values.
 pub fn shift_acc(m: &mut Core, value: i128, count: i128) -> R<i128> {
     // SPRU371F / C55x v3.x CPU 2.10.2.9 (M40) and SPRU374E 4.70.3 (SFTS):
     // M40 = 0 works on 32-bit values: the input's guard bits are
@@ -188,7 +188,7 @@ fn store_value(m: &mut Core, e: &Expr) -> R<i128> {
             let count = arith(m, b, false, false, false)?;
             let count = if matches!(b.as_ref(), Expr::Reg(Reg::T(_), _)) {
                 // SPRU374E 4.70.3: a Tx count outside -32..+31 saturates and reports overflow
-                m.ovf_pending = count < -32 || count > 31;
+                m.ovf_pending |= count < -32 || count > 31;
                 count.clamp(-32, 31)
             } else { count } * if *op == Op::Shl { 1 } else { -1 };
             let value = get(m, a)?;
@@ -324,7 +324,7 @@ fn bin(m: &mut Core, op: Op, a: &Expr, b: &Expr, mask: Option<i64>) -> R<i128> {
             let count = arith(m, b, false, false, true)?;
             let count = if matches!(b, Expr::Reg(Reg::T(_), _)) {
                 // SPRU374E 4.70.3: a Tx count outside -32..+31 saturates and reports overflow
-                m.ovf_pending = count < -32 || count > 31;
+                m.ovf_pending |= count < -32 || count > 31;
                 count.clamp(-32, 31)
             } else { count };
             let n = count * if op == Op::Shl { 1 } else { -1 };

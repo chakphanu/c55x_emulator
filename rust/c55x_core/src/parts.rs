@@ -13,9 +13,10 @@ use crate::stmt::Part;
 /// A part's read-phase result. A plain struct passed by reference: moving a packed enum
 /// through R<_> caused store-forwarding stalls on every instruction.
 #[derive(Default)]
-struct Pending { v: i128, carry: Option<u8>, vs: Vec<i128> }
+struct Pending { v: i128, carry: Option<u8>, ovf: bool, vs: Vec<i128> }
 
 fn read(m: &mut Core, p: &Part, out: &mut Pending) -> R<()> {
+    m.ovf_pending = false; // overflow is per part (SPRU374E 4.27): none from a neighbour
     out.v = match p {
         Part::RegToggle(r, _) | Part::RegBit(r, _, _) | Part::HiLoad(_, r) => m.st.get(*r),
         Part::BitCount(_, a, b, _) => {
@@ -84,8 +85,9 @@ fn read(m: &mut Core, p: &Part, out: &mut Pending) -> R<()> {
             }
         },
         Part::Assign(a) => {
-            let (v, c) = a.read(m)?;
+            let (v, c, o) = a.read(m)?;
             out.carry = c;
+            out.ovf = o;
             v
         }
         _ => 0,
@@ -138,7 +140,7 @@ fn commit(m: &mut Core, p: &Part, pend: &mut Pending) -> R<()> {
         Part::DblPushAcc(_) => { m.push(v)?; m.push(v >> 16)? }
         Part::MarArith(r, _, _) => set(m, r, v)?,
         Part::Mar(e) => { get(m, e)?; }
-        Part::Assign(a) => a.commit(m, v, pend.carry)?,
+        Part::Assign(a) => a.commit(m, v, pend.carry, pend.ovf)?,
         Part::PopBoth(d) => {
             let hi = m.sys_pop()? as i128;
             let lo = m.pop()? as i128;

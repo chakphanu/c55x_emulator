@@ -10,7 +10,7 @@ use crate::state::{ST1_FRCT, ST1_SATD, ST2_RDM, ST3_SMUL};
 /// or negative value. Every such overflow reports the destination ACOVy
 /// (SPRU374E 4.48.2 for the accumulate; the ADD/SUB sections agree; C54CM = 0
 /// detection covers each operation, v3.x CPU 1.5.1): the pending flag set here is
-/// latched into the destination accumulator at the store (fuse.rs / dest.rs).
+/// latched into the destination accumulator when its assignment commits (fuse.rs).
 /// d_unit_result: is src such a result; saturate_acc: the detection and clamp.
 pub fn d_unit_result(src: &Expr) -> bool {
     // UnsignedProduct is exempt: SPRU374E 4.47.10/11 zero-extend the 32-bit
