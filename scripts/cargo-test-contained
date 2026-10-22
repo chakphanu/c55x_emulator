@@ -1,0 +1,45 @@
+#!/bin/sh
+# Build the Rust tests in a work job and run them in one emulator job (one slot) of
+# bin/c55x-contained: the core refuses to run outside an emulator job, and a work job
+# may not run it. Usage: scripts/cargo-test-contained [TEST ARGS...]
+# The arguments go to every test binary (e.g. a name filter, --nocapture).
+# CARGO_TARGET_DIR defaults to build/rust-target. A busy launcher (exit 75) is waited
+# for, never forced.
+set -eu
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+LAUNCH="$ROOT/bin/c55x-contained"
+export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/build/rust-target}"
+export RUSTC_WRAPPER= CARGO_BUILD_JOBS=1   # the 32-task job limit (AGENTS.md)
+export RUST_TEST_THREADS=2                 # libtest would start one thread per CPU
+LIST="$CARGO_TARGET_DIR/test-binaries.txt"
+cd "$ROOT"                                 # the job work dir: disk-backed, not tmpfs
+
+contained() {
+    while :; do
+        rc=0
+        "$LAUNCH" "$@" || rc=$?
+        [ "$rc" -ne 75 ] && return "$rc"
+        echo "cargo-test-contained: all emulator slots busy, waiting" >&2
+        sleep 20
+    done
+}
+
+mkdir -p "$CARGO_TARGET_DIR"
+contained --job work --env CARGO_TARGET_DIR --env RUSTC_WRAPPER --env CARGO_BUILD_JOBS \
+    --env CARGO_NET_OFFLINE -- \
+    sh -c 'cargo test --manifest-path "$1/rust/Cargo.toml" --workspace --no-run \
+           --message-format=json-render-diagnostics > "$2.json"' sh "$ROOT" "$LIST"
+grep '"test":true' "$LIST.json" | grep -o '"executable":"[^"]*"' \
+    | sed 's/^"executable":"//; s/"$//' > "$LIST"
+rm -f "$LIST.json"
+
+# The containment tests change the job's limits and environment: one thread.
+contained --env CARGO_TARGET_DIR --env RUST_TEST_THREADS -- sh -c '
+    list=$1; shift; rc=0
+    while read -r bin; do
+        case "$(basename "$bin")" in
+            containment-*) "$bin" --test-threads=1 "$@" || rc=1 ;;
+            *) "$bin" "$@" || rc=1 ;;
+        esac
+    done < "$list"
+    exit $rc' sh "$LIST" "$@"

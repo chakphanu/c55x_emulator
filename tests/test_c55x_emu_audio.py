@@ -1,6 +1,7 @@
 """C55x emulator audio path: DMA controller and McBSP0 transmitter of the Rust core
 (rust/c55x_core/src/dma.rs, mcbsp.rs) driven by small programs through I/O ports, the
-AIC23 register decoding (codec.py) and fw/hello_audio end to end."""
+AIC23 register decoding (codec.py) and fw/hello_audio end to end. HI(ACx) loads:
+rust/c55x_core/tests/semantics.rs."""
 
 import struct
 import unittest
@@ -91,15 +92,6 @@ class McBspStreamTests(unittest.TestCase):
         cpu.audio_clock = lambda: (0, 108.0)                     # codec inactive
         cpu.run(10_000, until=1_080_000)
         self.assertEqual(cpu.core.take_audio(), [])
-
-
-class HiLoadTests(unittest.TestCase):
-    def test_hi_takes_the_sign_into_the_guard_bits(self):   # SPRU375E 4.5.3
-        # the low half is cleared: cl55 builds a long as HI(ACx) = hi; ACx |= lo
-        cpu, _ = machine("AC0 = #-5", "AR1 = #3", "HI(AC0) = AR1", "AC1 = #5", "AR2 = #-2",
-                         "HI(AC1) = AR2")
-        run(cpu)
-        self.assertEqual((cpu.ac[0], cpu.ac[1]), (0x00030000, 0xFFFFFE0000))
 
 
 def codec(*writes):

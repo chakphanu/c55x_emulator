@@ -410,3 +410,23 @@ Infra decisions in detail:
    test_similarly_named_group_outside_the_shared_slice_is_refused) switch to a Rust
    binary. Everything else becomes Rust.
 8. The fork is never pushed by agents; commits stay local.
+
+## 7. Progress and program adaptations
+
+The `.byte` encoding below is a fourth kind of adaptation besides the three named in
+section 3 (asm55 spelling, symbol addresses, text-only fixtures): it keeps the listing
+produced by the tools. There is no text-only fixture so far.
+
+Pilot (rust/c55x_core/tests/common + semantics.rs, fixture semantics): 18 tests
+(SemanticTests 17 + HiLoadTests 1) pass in an emulator job via scripts/cargo-test-contained.
+The same binary is refused in a work job and outside the launcher (guard message).
+
+Where the Python test text is not what asm55 assembles / dis55 prints, the fixture uses the
+tool spelling. The expected values are unchanged:
+
+| Test | Python text | Fixture | Why |
+|---|---|---|---|
+| semantics::long_constant_and_logical_shift | `AC1 = AC0 >>> #1` | `AC1 = AC0 <<< #-1` | asm55 E0003: `>>>` needs the same register on both sides; the two-register logical shift is `<<< #-k` |
+| semantics::standalone_conditional_execute_skips_the_next_instruction | `TC1 = #0` | `bit(ST0, #13) = #0` | no `TC1 = #0` spelling in asm55; dis55 prints the BCLR as bit(ST0, #13) |
+| semantics::goto_out_of_a_loop_ends_it | 1-instruction localrepeat body | body `T1 = T1 + #1`, `nop` | asm55 E0800: localrepeat body under the minimum size |
+| semantics::goto_out_of_a_loop_ends_it | `if (TC1) goto` out of a localrepeat | `.byte 0x61, 0x64` (its encoding, assembled outside the loop at the same address) | asm55 E0800 refuses a branch out of a localrepeat; real listings have it (mtp_proplist_count). dis55 lists the bytes back as the branch, so the listing stays tool output and no text-only fixture is needed |
