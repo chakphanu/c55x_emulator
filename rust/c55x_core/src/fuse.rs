@@ -60,7 +60,9 @@ impl Assign {
         let register_alu = matches!(&dst, Expr::Reg(Reg::Ac(_) | Reg::T(_) | Reg::Ar(_), _));
         let carry = register_alu && matches!(src, Expr::AddSub { product: false, .. });
         let test = matches!(dst, Expr::Reg(Reg::Tc1, _) | Expr::Reg(Reg::Tc2, _));
-        let sat = is_acc(&dst) && d_unit_result(&src);
+        // SPRU374E 4.5.1: an ACx to ACy move is a 40-bit D-unit ALU operation with
+        // overflow detection (ACOVy) and SATD; a TAx destination takes the 16 LSBs.
+        let sat = is_acc(&dst) && (d_unit_result(&src) || is_acc(&src));
         let sat_a = matches!(&dst, Expr::Reg(Reg::T(_) | Reg::Ar(_), _)) && d_unit_result(&src);
         let acc = is_acc(&dst);
         let unary_carry = match &src {

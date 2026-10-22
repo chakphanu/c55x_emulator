@@ -164,7 +164,6 @@ class StatusFlagTests(unittest.TestCase):
         run(cpu)
         self.assertEqual(cpu.core.acov(), [0, 0, 0, 0])
 
-    @unittest.expectedFailure       # not fixed yet (F10)
     def test_accumulator_move_reports_overflow(self):
         # SPRU374E 4.5.1 example: MOV AC0, AC1 with M40 = 0, SATD = 0
         cpu, _ = machine("AC1 = AC0")
