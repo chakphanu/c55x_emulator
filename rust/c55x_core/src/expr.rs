@@ -165,7 +165,9 @@ fn mac_operand(m: &mut Core, e: &Expr) -> R<i128> {
     if meta(e).2 {
         return Ok(sext(get(m, e)? >> 16, 17));
     }
-    arith(m, e, false, true, false)
+    // SPRU371F 2.10.2.11: 16-bit MAC inputs are sign extended regardless of SXMD;
+    // a uns() operand stays zero extended
+    arith(m, e, false, false, false)
 }
 
 /// Python int shift; amounts beyond what 40-bit values shifted into i128 allow are errors.

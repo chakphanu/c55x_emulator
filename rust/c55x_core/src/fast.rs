@@ -139,7 +139,7 @@ fn mac_fx(e: &Rc<Expr>) -> Fx {
         let g = get_fx(e);
         return Box::new(move |m| Ok(sext(g(m)? >> 16, 17)));
     }
-    arith_fx(e, false, true, false)
+    arith_fx(e, false, false, false)    // signed operands ignore SXMD (SPRU371F 2.10.2.11)
 }
 
 /// expr::bin

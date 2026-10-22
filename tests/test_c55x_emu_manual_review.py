@@ -171,6 +171,48 @@ class UnsignedProductTests(unittest.TestCase):
         self.assertEqual((cpu.core.acov(), cpu.carry), ([1, 0, 0, 0], 0))
 
 
+class SxmdIndependentOperandTests(unittest.TestCase):
+    """With SXMD = 0, 16-bit MAC input operands are still sign extended to 17
+    bits (SPRU371F 2.10.2.11) and uns() operands stay zero extended; a byte
+    loaded into a T/AR register is sign extended to 16 bits regardless of SXMD,
+    while an accumulator destination follows SXMD (SPRU374E 4.4.5 / 4.4.6)."""
+
+    def run_with(self, insn, words, t1=0, ac0=0):
+        cpu, bus = machine(bit(SXMD, 0), "XAR0 = mar(*(#01600h))", "XAR1 = mar(*(#01600h))",
+                           "XAR2 = mar(*(#01601h))", insn)
+        for i, w in enumerate(words):
+            bus.write(0x1600 + i, w)
+        cpu.t[1], cpu.ac[0] = t1, ac0
+        run(cpu)
+        return cpu
+
+    def test_multiply_operands_ignore_sxmd(self):
+        cpu = self.run_with("AC1 = T1 * *AR1", [0xFFFF], t1=0xFFFF)
+        self.assertEqual(cpu.ac[1], 0x00_0000_0001)
+        self.assertEqual(cpu.core.acov(), [0, 0, 0, 0])
+
+    def test_mac_operands_ignore_sxmd(self):
+        cpu = self.run_with("AC0 = AC0 + (T1 * *AR1)", [0xFFFF], t1=0xFFFF, ac0=0x10)
+        self.assertEqual(cpu.ac[0], 0x00_0000_0011)
+        self.assertEqual(cpu.core.acov(), [0, 0, 0, 0])
+
+    def test_unsigned_operands_stay_zero_extended(self):
+        cpu = self.run_with("AC1 = uns(*AR1) * uns(*AR2)", [0xFFFF, 0xFFFF])
+        self.assertEqual(cpu.ac[1], 0x00_FFFE_0001)
+
+    def test_byte_load_to_ta_register_ignores_sxmd(self):
+        cpu = self.run_with("T0 = low_byte(*AR0)", [0x0080])
+        self.assertEqual(cpu.t[0], 0xFF80)
+        cpu = self.run_with("AR2 = high_byte(*AR0)", [0x8000])
+        self.assertEqual(cpu.xar[2] & 0xFFFF, 0xFF80)
+        cpu = self.run_with("T0 = uns(low_byte(*AR0))", [0x0080])
+        self.assertEqual(cpu.t[0], 0x0080)
+
+    def test_byte_load_to_accumulator_follows_sxmd(self):
+        cpu = self.run_with("AC0 = low_byte(*AR0)", [0x0080])
+        self.assertEqual(cpu.ac[0], 0x00_0000_0080)
+
+
 class StatusFlagTests(unittest.TestCase):
     def test_acov_is_part_of_st0(self):
         # SPRU371F 2.10.1.1: ACOV0 is bit 10 of ST0_55, read/write

@@ -129,6 +129,11 @@ impl Assign {
                 let operand = arith_fx(x, false, true, false);
                 Box::new(move |m| Ok(-sext(operand(m)?, 16)))
             }
+            // SPRU374E 4.4.5 / 4.4.6: a byte loaded into TAx is sign extended to 16 bits
+            // regardless of SXMD (uns() zero extends); ACx follows SXMD
+            Expr::Byte { .. } if matches!(&dst, Expr::Reg(Reg::T(_) | Reg::Ar(_), _)) => {
+                arith_fx(&src, false, false, false)
+            }
             _ => arith_fx(&src, false, true, false),
         };
         Assign { fx, src, store: store_fx(dst), sat, sat_a, carry, unary_carry, logical_carry, test, acov }
