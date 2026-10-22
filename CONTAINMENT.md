@@ -24,10 +24,14 @@ reference core (`ORACLE_V2.md`). To try a new core build without touching it:
 
 | Scope | Limit |
 | --- | --- |
-| Shared group `c55x.slice` (all launches) | memory.max 4 GiB, memory.high 3 GiB, swap 0, 64 tasks, 200% CPU |
-| One emulator job (`c55x-emu.service`), descendants included | memory 1 GiB default / 2 GiB hard, swap 0, 32 tasks, 100% CPU, oom.group |
+| Shared group `c55x.slice` (all launches) | memory.max 10 GiB, memory.high 9 GiB, swap 0, 320 tasks, 1000% CPU |
+| One emulator job (slot unit `c55x-emu.service` or `c55x-emu-1.service` .. `c55x-emu-7.service`), descendants included | memory 1 GiB default / 2 GiB hard, swap 0, 32 tasks, 100% CPU, oom.group |
 | One job | 600 s CPU, 900 s wall, 5 s stop grace, 512 fds, no core dumps |
-| Admission | at most one emulator job; host MemAvailable >= 16 GiB; work dir not on tmpfs |
+| Admission | at most eight emulator jobs (one per slot); host MemAvailable >= 16 GiB; work dir not on tmpfs |
+
+A core built before the eight-slot change caps the shared group at the earlier
+single-slot values (4 GiB, 3 GiB, 64 tasks, 200% CPU) and accepts only
+`c55x-emu.service`, so it refuses to run under these limits; rebuild it.
 
 ## How it is enforced
 
@@ -35,14 +39,18 @@ reference core (`ORACLE_V2.md`). To try a new core build without touching it:
    service in `c55x.slice`, with `OOMPolicy=kill`, `RuntimeMaxSec`, `Limit*`
    and the cgroup properties above. Before the payload starts, a verifier
    inside the job reads the real cgroup files and rlimits and execs the
-   payload only if all match. The emulator job has a fixed unit name, so a job
-   orphaned by a dead launcher still blocks a replacement and still ends at its
-   wall-time limit.
+   payload only if all match. Each of the eight emulator slots has a fixed
+   unit name and its own lock (`emulator.lock`, `emulator-<k>.lock`): a launch
+   takes the first slot whose lock is free and whose unit is not running, and
+   exits 75 when there is none. A job orphaned by a dead launcher keeps its
+   limits, blocks only its own slot and still ends at its wall-time limit.
+   `--status` lists every slot.
 2. `rust/c55x_core/src/policy.rs` (pyo3-free, unit tested with fake cgroup
    trees) is called when a `Core` is constructed and at execution entries. It
    resolves the cgroup2 mount from mountinfo, requires the process to be in
-   `.../c55x.slice/c55x-emu.service`, and checks job and shared-group memory,
-   swap, tasks, CPU, `memory.oom.group` and the process rlimits. Failure raises
+   `.../c55x.slice/<slot unit>` (exactly one of the eight slot unit names),
+   and checks job and shared-group memory, swap, tasks, CPU,
+   `memory.oom.group` and the process rlimits. Failure raises
    `c55x_core.ResourcePolicyError`. Single-step calls re-check at most every
    50 ms (a full check costs ~120 us and would slow stepping 25x).
 3. Emulator-level caps, independent of the cgroup: program image and `Bus`

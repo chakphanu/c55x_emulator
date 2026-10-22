@@ -184,6 +184,21 @@ ACOV1 bit position in ST0_55; repeated SUBC without overflow.
   one defect (entry 4, `uns()` products), fixed in 59bcf0b; reviews of that
   fix, of the added tests and of entry 11 found no defect.
 
+### Containment
+
+Guest behavior is unchanged: only the launcher and the containment guard
+(`rust/c55x_core/src/policy.rs`) change.
+
+- Eight concurrent emulator slots instead of one. Slot 0 keeps the unit
+  `c55x-emu.service` and the lock `emulator.lock`; slot k = 1..7 uses
+  `c55x-emu-<k>.service` and `emulator-<k>.lock`. The guard accepts exactly
+  these eight unit names.
+- The shared group `c55x.slice` is raised to memory.max 10 GiB, memory.high
+  9 GiB, 320 tasks and 1000% CPU (swap stays 0). Per-job limits and admission
+  are unchanged.
+- A core built before this change refuses to run under the raised shared
+  limits and in slots 1..7; rebuild it.
+
 ## Earlier changes
 
 The semantic changes of the oracle v2 build relative to the original snapshot

@@ -3,9 +3,9 @@
 
 Runs a payload as a systemd user service inside the shared slice c55x.slice
 (cgroup v2), reads the limits back from the kernel inside the job before the
-payload starts, admits at most one emulator job at a time, and reports a
-distinct outcome for each failure class. There is no fallback: if containment
-cannot be verified the payload does not run.
+payload starts, admits at most one emulator job per slot (eight slots), and
+reports a distinct outcome for each failure class. There is no fallback: if
+containment cannot be verified the payload does not run.
 
 Usage:
   c55x-contained [--job emulator|work] [--mem SIZE] [--cpu-sec N]
@@ -32,7 +32,8 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SLICE = "c55x.slice"
-EMU_UNIT = "c55x-emu.service"
+EMU_UNIT = "c55x-emu.service"    # slot 0; slot k > 0 is c55x-emu-<k>.service
+SLOTS = 8                        # concurrent emulator jobs
 LOCK_DIR = Path("/run/user") / str(os.getuid()) / "c55x-contained"
 
 GIB = 1024 ** 3
@@ -40,10 +41,10 @@ MAX_MEM_BYTES = 2 * GIB          # hard ceiling for one job
 MAX_CPU_SEC = 600
 MAX_WALL_SEC = 900
 MIN_HEADROOM_BYTES = 16 * GIB    # host MemAvailable needed to admit a job
-SLICE_MEM_MAX = 4 * GIB
-SLICE_MEM_HIGH = 3 * GIB
-SLICE_TASKS = 64
-SLICE_CPU_QUOTA = (200000, 100000)
+SLICE_MEM_MAX = 10 * GIB
+SLICE_MEM_HIGH = 9 * GIB
+SLICE_TASKS = 320
+SLICE_CPU_QUOTA = (1000000, 100000)
 JOB_TASKS = 32
 JOB_CPU_QUOTA = (100000, 100000)
 JOB_FDS = 512
@@ -132,6 +133,10 @@ def unit_props(env, unit, *names):
     return props
 
 
+def unit_active(env, unit):
+    return systemctl(env, "is-active", "--quiet", unit).returncode == 0
+
+
 def set_slice_limits(env):
     r = systemctl(env, "set-property", "--runtime", SLICE,
                   "MemoryMax=%d" % SLICE_MEM_MAX, "MemoryHigh=%d" % SLICE_MEM_HIGH,
@@ -187,28 +192,63 @@ def on_tmpfs(path):
 
 # ------------------------------------------------------------ admission
 
+def slot_unit(k):
+    return EMU_UNIT if k == 0 else "c55x-emu-%d.service" % k
+
+
+def slot_lock(k):
+    return "emulator.lock" if k == 0 else "emulator-%d.lock" % k
+
+
+EMU_UNITS = tuple(slot_unit(k) for k in range(SLOTS))
+
+
+def slot_count():
+    # Test hook: a LOWER slot count can be injected (never a higher one), so
+    # it can only make admission stricter.
+    n = SLOTS
+    inj = os.environ.get("C55X_TEST_SLOTS", "")
+    if inj.isdigit():
+        n = min(n, int(inj))
+    return n
+
+
 class Admission:
-    """Per-user single emulator slot: an advisory lock (owner pid recorded)
-    plus the fixed unit name, so a job orphaned by a dead launcher still
-    blocks a replacement until it ends."""
+    """Per-user emulator slots. Slot k is an advisory lock (owner pid
+    recorded) plus a fixed unit name, so a job orphaned by a dead launcher
+    still blocks its own slot until it ends."""
 
     def __init__(self):
         self.fd = None
+        self.unit = None
+        self.busy = []
 
-    def acquire(self):
+    def acquire(self, env):
+        """Take the first slot whose lock is free and whose unit is not
+        active. Returns its unit name, or None with self.busy describing
+        every slot when all are taken."""
         LOCK_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
-        self.fd = os.open(str(LOCK_DIR / "emulator.lock"), os.O_CREAT | os.O_RDWR, 0o600)
-        try:
-            fcntl.flock(self.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError as e:
-            os.close(self.fd)
-            self.fd = None
-            if e.errno in (errno.EWOULDBLOCK, errno.EAGAIN):
-                return False
-            raise
-        os.ftruncate(self.fd, 0)
-        os.write(self.fd, b"%d\n" % os.getpid())
-        return True
+        self.busy = []
+        for k in range(slot_count()):
+            unit = slot_unit(k)
+            fd = os.open(str(LOCK_DIR / slot_lock(k)), os.O_CREAT | os.O_RDWR, 0o600)
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError as e:
+                os.close(fd)
+                if e.errno in (errno.EWOULDBLOCK, errno.EAGAIN):
+                    self.busy.append("%s held" % unit)
+                    continue
+                raise
+            if unit_active(env, unit):     # e.g. orphaned by a dead launcher
+                os.close(fd)
+                self.busy.append("%s still running" % unit)
+                continue
+            os.ftruncate(fd, 0)
+            os.write(fd, b"%d\n" % os.getpid())
+            self.fd, self.unit = fd, unit
+            return unit
+        return None
 
     def release(self):
         if self.fd is not None:
@@ -258,6 +298,8 @@ def inner_verify(args):
             pass
         sys.exit(RC_INNER_POLICY)
 
+    if os.environ.get("C55X_CONTAINED_JOB") == "emulator" and args.unit not in EMU_UNITS:
+        fail("unit %s is not an emulator slot unit" % args.unit)
     d = cgroup2_dir()
     if d is None:
         fail("cannot resolve the cgroup2 membership")
@@ -381,15 +423,12 @@ def run_job(args):
 
     adm = None
     if args.job == "emulator":
-        unit = EMU_UNIT
         adm = Admission()
-        if not adm.acquire():
-            die(RC_BUSY, "busy", "another emulator job holds the slot; wait for it")
-        active = systemctl(env, "is-active", "--quiet", unit).returncode == 0
-        if active:
-            adm.release()
-            die(RC_BUSY, "busy", "unit %s is still running (possibly orphaned by a dead "
-                "launcher; it stops by itself within its wall-time limit)" % unit)
+        unit = adm.acquire(env)
+        if unit is None:
+            die(RC_BUSY, "busy", "all %d emulator slots are busy (%s); wait for one (a unit "
+                "still running without a launcher stops by itself within its wall-time "
+                "limit)" % (slot_count(), ", ".join(adm.busy) or "none configured"))
         systemctl(env, "reset-failed", unit)      # clear only a finished leftover
     else:
         unit = "c55x-work-%d-%s.service" % (os.getpid(), uuid.uuid4().hex[:8])
@@ -463,11 +502,13 @@ def parse_mem(args):
 def do_status(env):
     set_slice_limits(env)
     p = unit_props(env, SLICE, "MemoryMax", "MemorySwapMax", "TasksMax")
-    busy = systemctl(env, "is-active", "--quiet", EMU_UNIT).returncode == 0
     avail = mem_available()
     print("slice %s: MemoryMax=%s MemorySwapMax=%s TasksMax=%s" % (
         SLICE, p.get("MemoryMax"), p.get("MemorySwapMax"), p.get("TasksMax")))
-    print("emulator slot: %s" % ("busy" if busy else "free"))
+    for k in range(slot_count()):
+        unit = slot_unit(k)
+        print("emulator slot %d: %s %s" % (
+            k, "busy" if unit_active(env, unit) else "free", unit))
     print("host MemAvailable: %.1f GiB (need %d GiB) -> admission %s" % (
         avail / GIB, MIN_HEADROOM_BYTES // GIB,
         "ok" if avail >= MIN_HEADROOM_BYTES else "refused (low headroom)"))

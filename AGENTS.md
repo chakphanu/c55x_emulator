@@ -17,7 +17,7 @@ limit (32) when sccache is active; if a build fails with "Unable to install
 ctrlc handler", run it as `RUSTC_WRAPPER= CARGO_BUILD_JOBS=2
 bin/c55x-contained --job work --env RUSTC_WRAPPER --env CARGO_BUILD_JOBS -- ./rust/build.sh`.
 
-Exit 75 means another emulator job is running: wait. Exit 79 or 124 means the
+Exit 75 means all eight emulator slots are busy: wait. Exit 79 or 124 means the
 job hit its memory or time limit: reduce the work. Never raise a limit, kill
 another job, clear a lock, or edit cgroup files yourself. Details and the
 exit-code table: `CONTAINMENT.md`.

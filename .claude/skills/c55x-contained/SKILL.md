@@ -30,7 +30,7 @@ Compilers, sanitizer runs and other heavy non-emulator work (cannot build a
     bin/c55x-contained --job work -- ./rust/build.sh
     bin/c55x-contained --job work --mem 2G -- cargo test
 
-Read-only status of the emulator slot and host headroom:
+Read-only status of every emulator slot and of the host headroom:
 
     bin/c55x-contained --status
 
@@ -57,17 +57,18 @@ decision.
 
 ## Job classes
 
-- `emulator`: one at a time for this user across all worktrees and shells. A
-  second launch gets exit 75, including when the running job was orphaned by a
-  dead launcher (it keeps its limits and stops by itself at its wall-time
-  limit; nothing is killed to make room). Only this class can construct a
-  `Core`.
+- `emulator`: up to eight at a time for this user across all worktrees and
+  shells, one per slot (units `c55x-emu.service`, `c55x-emu-1.service` ..
+  `c55x-emu-7.service`). A launch takes the first free slot and gets exit 75
+  when all eight are busy. A job orphaned by a dead launcher keeps its limits
+  and its slot until it stops by itself at its wall-time limit; nothing is
+  killed to make room. Only this class can construct a `Core`.
 - `work`: for compilers and sanitizers; several can run at once. Virtual
   address space is 16 GiB (ASan shadow mappings); the physical ceiling is the
   same bounded `--mem`.
 
-All jobs share `c55x.slice`: 4 GiB memory (3 GiB high), no swap, 64 tasks,
-200 percent CPU. One job: no swap, at most 32 tasks, 100 percent CPU, 512 open
+All jobs share `c55x.slice`: 10 GiB memory (9 GiB high), no swap, 320 tasks,
+1000 percent CPU. One job: no swap, at most 32 tasks, 100 percent CPU, 512 open
 files, no core dumps, 5 s stop grace. Admission needs 16 GiB MemAvailable on
 the host. Before the payload starts, a verifier inside the job reads the real
 cgroup files and rlimits and refuses to continue if any differs.
@@ -80,7 +81,7 @@ cgroup files and rlimits and refuses to continue if any differs.
 | any other non-zero | The payload's own exit status (reserved codes below are remapped to 70) | Read its output |
 | 70 | Incomplete result, or the payload exited with a reserved code | Treat as failure; read stderr |
 | 74 | Host headroom below 16 GiB | Wait; do not free memory by killing other programs |
-| 75 | Emulator slot busy | Wait for it; never kill or clear it |
+| 75 | All eight emulator slots busy | Wait for one; never kill or clear it |
 | 77 | Policy refused (limits, work dir, user manager, verification) | Fix the reported cause; do not bypass |
 | 79 | Local cgroup OOM: the job hit its memory ceiling | Reduce the workload; do not raise `--mem` yourself |
 | 124 | Wall-time or CPU-time limit | Split the work; do not raise limits yourself |

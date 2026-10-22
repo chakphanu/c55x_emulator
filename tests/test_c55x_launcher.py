@@ -1,18 +1,22 @@
 """Containment tests, scope B: bin/c55x-contained.
 
 Must run OUTSIDE a job (plain `python3 -m unittest tests.test_c55x_launcher`):
-the launcher is the thing under test and an emulator job already holds the
-single slot. Real kernel enforcement is exercised with tiny budgets (64 MiB)
+the launcher is the thing under test and the slot tests need every emulator
+slot free. Real kernel enforcement is exercised with tiny budgets (64 MiB)
 in bounded jobs; cases that would need real host exhaustion or kernel
-mutation outside the job use mocks and say so.
+mutation outside the job use mocks and say so (MockedLauncherTests makes no
+systemd call at all).
 
 Every process these tests start is owned by the test and is cleaned up by
 exact handle or exact unit name; nothing broad is killed. Tests that build a
 Core need a guarded core: set ZEN_CORE_DIR to a directory holding it.
 """
 
+import argparse
+import fcntl
 import importlib.machinery
 import importlib.util
+import io
 import json
 import os
 import pathlib
@@ -30,7 +34,15 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 LAUNCHER = ROOT / "bin" / "c55x-contained"
 TMP = ROOT / "build" / "test-tmp"
 EMU_UNIT = "c55x-emu.service"
+EMU_UNITS = (EMU_UNIT,) + tuple("c55x-emu-%d.service" % k for k in range(1, 8))
 PY = sys.executable
+ONE_SLOT = dict(os.environ, C55X_TEST_SLOTS="1")    # the job can only get EMU_UNIT
+TWO_SLOTS = dict(os.environ, C55X_TEST_SLOTS="2")
+# payload: write the name of its own job unit to argv[1], then sleep argv[2] s
+UNIT_OF_JOB = ("import pathlib,sys,time\n"
+               "rel=[l for l in open('/proc/self/cgroup') if l.startswith('0::')][0][3:].strip()\n"
+               "pathlib.Path(sys.argv[1]).write_text(pathlib.PurePath(rel).name)\n"
+               "time.sleep(float(sys.argv[2]))\n")
 
 
 def load_launcher():
@@ -61,6 +73,35 @@ def unit_active(unit=EMU_UNIT):
                           ).returncode == 0
 
 
+def any_slot_active():
+    return any(unit_active(u) for u in EMU_UNITS)
+
+
+def written(*paths):
+    return all(p.exists() and p.read_text() for p in paths)
+
+
+def fake_job_tree(root, unit, mem_max):
+    """A mocked kernel tree holding exactly the values the launcher sets."""
+    slc = root / "c55x.slice"
+    job = slc / unit
+    job.mkdir(parents=True)
+    g = 1 << 30
+    vals = {job: {"memory.max": str(mem_max), "memory.swap.max": "0", "pids.max": "32",
+                  "memory.oom.group": "1", "cpu.max": "100000 100000"},
+            slc: {"memory.max": str(10 * g), "memory.high": str(9 * g),
+                  "memory.swap.max": "0", "pids.max": "320", "cpu.max": "1000000 100000"}}
+    for d, kv in vals.items():
+        for k, v in kv.items():
+            (d / k).write_text(v + "\n")
+    return job
+
+
+def inner_args(unit, mem):
+    return argparse.Namespace(unit=unit, mem_bytes=mem, cpu_sec=600,
+                              as_bytes=2 << 30, cmd=["payload", "arg"])
+
+
 def wait_until(pred, secs, step=0.2):
     end = time.time() + secs
     while time.time() < end:
@@ -77,7 +118,7 @@ class LauncherTests(unittest.TestCase):
         TMP.mkdir(parents=True, exist_ok=True)
         self.tmp = pathlib.Path(tempfile.mkdtemp(dir=TMP))
         self.sentinels = []
-        wait_until(lambda: not unit_active(), 30)
+        wait_until(lambda: not any_slot_active(), 30)
 
     def tearDown(self):
         for p in self.sentinels:                  # exactly the processes we started
@@ -106,9 +147,9 @@ class LauncherTests(unittest.TestCase):
             self.assertEqual(r.returncode, 0, r.stderr)
             v = json.loads(r.stdout)
             self.assertEqual(v["slice"], "c55x.slice")
-            self.assertEqual(v["unit"] == EMU_UNIT, job == "emulator")
+            self.assertEqual(v["unit"] in EMU_UNITS, job == "emulator")
             self.assertEqual(v["job"], [str(64 << 20), "0", "32", "1", "100000 100000"])
-            self.assertEqual(v["shared"], [str(4 * g), str(3 * g), "0", "64", "200000 100000"])
+            self.assertEqual(v["shared"], [str(10 * g), str(9 * g), "0", "320", "1000000 100000"])
 
     def test_argv_cwd_streams_stdin_and_exit_code_are_preserved(self):
         code = ("import sys,os,json\n"
@@ -183,60 +224,6 @@ class LauncherTests(unittest.TestCase):
             self.assertEqual(r.returncode, 70, (code, r.stderr))
             self.assertIn("outcome=incomplete", r.stderr)
 
-    # ---- job-side verification (mocked kernel tree) ---------------------
-
-    def _fake_job_tree(self, mem_max):
-        slc = self.tmp / "c55x.slice"
-        job = slc / L.EMU_UNIT
-        job.mkdir(parents=True)
-        g = 1 << 30
-        vals = {job: {"memory.max": str(mem_max), "memory.swap.max": "0", "pids.max": "32",
-                      "memory.oom.group": "1", "cpu.max": "100000 100000"},
-                slc: {"memory.max": str(4 * g), "memory.high": str(3 * g),
-                      "memory.swap.max": "0", "pids.max": "64", "cpu.max": "200000 100000"}}
-        for d, kv in vals.items():
-            for k, v in kv.items():
-                (d / k).write_text(v + "\n")
-        return job
-
-    def _inner_args(self, mem):
-        import argparse
-        return argparse.Namespace(unit=L.EMU_UNIT, mem_bytes=mem, cpu_sec=600,
-                                  as_bytes=2 << 30, cmd=["payload", "arg"])
-
-    def test_job_side_verification_execs_only_when_values_match(self):
-        import resource
-        job = self._fake_job_tree(64 << 20)
-        ok = {resource.RLIMIT_CPU: (600, 600), resource.RLIMIT_NOFILE: (512, 512),
-              resource.RLIMIT_CORE: (0, 0), resource.RLIMIT_AS: (2 << 30, 2 << 30)}
-        with mock.patch.object(L, "cgroup2_dir", lambda: job), \
-                mock.patch.object(L, "LOCK_DIR", self.tmp / "locks"), \
-                mock.patch("resource.getrlimit", lambda r: ok[r]), \
-                mock.patch("os.execvp") as ex:
-            L.inner_verify(self._inner_args(64 << 20))
-            ex.assert_called_once_with("payload", ["payload", "arg"])
-            ex.reset_mock()
-            with self.assertRaises(SystemExit) as cm:        # expectation differs from kernel
-                L.inner_verify(self._inner_args(128 << 20))
-            self.assertEqual(cm.exception.code, 78)
-            self.assertTrue((self.tmp / "locks" / (L.EMU_UNIT + ".verify-failed")).exists())
-            (job / "memory.max").write_text("max\n")         # relaxed job
-            with self.assertRaises(SystemExit) as cm:
-                L.inner_verify(self._inner_args(64 << 20))
-            self.assertEqual(cm.exception.code, 78)
-            ex.assert_not_called()
-        bad = dict(ok)
-        bad[resource.RLIMIT_NOFILE] = (1024, 1024)
-        (job / "memory.max").write_text(str(64 << 20) + "\n")
-        with mock.patch.object(L, "cgroup2_dir", lambda: job), \
-                mock.patch.object(L, "LOCK_DIR", self.tmp / "locks"), \
-                mock.patch("resource.getrlimit", lambda r: bad[r]), \
-                mock.patch("os.execvp") as ex:
-            with self.assertRaises(SystemExit) as cm:
-                L.inner_verify(self._inner_args(64 << 20))
-            self.assertEqual(cm.exception.code, 78)
-            ex.assert_not_called()
-
     # ---- real kernel enforcement with tiny budgets ----------------------
 
     def test_children_below_individual_limits_exceed_the_aggregate_budget(self):
@@ -246,7 +233,7 @@ class LauncherTests(unittest.TestCase):
                 "'b=bytearray(30<<20)\\nfor i in range(0,len(b),4096): b[i]=1\\n"
                 "import time;time.sleep(30)']) for _ in range(4)]\n"
                 "time.sleep(30)")
-        r = launch("--mem", "64M", "--wall-sec", "40", "--", PY, "-c", code)
+        r = launch("--mem", "64M", "--wall-sec", "40", "--", PY, "-c", code, env=ONE_SLOT)
         self.assertEqual(r.returncode, 79, r.stderr)           # 4 x 30 MiB > 64 MiB
         self.assertIn("outcome=oom", r.stderr)
         self.assertIsNone(sentinel.poll(), "outside sentinel must survive a local OOM")
@@ -269,7 +256,7 @@ class LauncherTests(unittest.TestCase):
         code = ("import signal,time\nsignal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
                 "time.sleep(120)")
         t0 = time.time()
-        r = launch("--mem", "64M", "--wall-sec", "3", "--", PY, "-c", code)
+        r = launch("--mem", "64M", "--wall-sec", "3", "--", PY, "-c", code, env=ONE_SLOT)
         self.assertEqual(r.returncode, 124, r.stderr)
         self.assertIn("outcome=timeout", r.stderr)
         self.assertLess(time.time() - t0, 25)
@@ -289,46 +276,80 @@ class LauncherTests(unittest.TestCase):
 
     # ---- admission, orphans, interruption -------------------------------
 
-    def test_two_launchers_cannot_run_two_emulator_payloads(self):
-        marker = self.tmp / "second-ran"
-        first = subprocess.Popen([str(LAUNCHER), "--mem", "64M", "--wall-sec", "20", "--",
-                                  "sleep", "6"], cwd=ROOT)
+    def test_concurrent_emulator_jobs_get_distinct_slots_until_all_are_busy(self):
+        names = [self.tmp / "unit-a", self.tmp / "unit-b"]
+        jobs = [subprocess.Popen([str(LAUNCHER), "--mem", "64M", "--wall-sec", "30", "--",
+                                  PY, "-c", UNIT_OF_JOB, str(n), "8"], cwd=ROOT, env=TWO_SLOTS)
+                for n in names]
         try:
-            self.assertTrue(wait_until(unit_active, 15))
+            self.assertTrue(wait_until(lambda: written(*names), 20))
+            self.assertEqual({n.read_text() for n in names}, {EMU_UNIT, "c55x-emu-1.service"})
+            marker = self.tmp / "third-ran"
             other_cwd = pathlib.Path(tempfile.mkdtemp(dir=TMP))   # a different "worktree"
             try:
                 r = launch("--mem", "64M", "--wall-sec", "10", "--", "touch", str(marker),
-                           cwd=other_cwd)
+                           cwd=other_cwd, env=TWO_SLOTS)
             finally:
                 other_cwd.rmdir()
             self.assertEqual(r.returncode, 75, r.stderr)
             self.assertIn("outcome=busy", r.stderr)
+            self.assertIn("all 2 emulator slots are busy", r.stderr)
             self.assertFalse(marker.exists())
-            # a work job is a different class and is not blocked by the slot
-            w = launch("--job", "work", "--mem", "64M", "--wall-sec", "10", "--", "true")
+            st = launch("--status", env=TWO_SLOTS)
+            self.assertIn("emulator slot 0: busy c55x-emu.service", st.stdout)
+            self.assertIn("emulator slot 1: busy c55x-emu-1.service", st.stdout)
+            # a work job is a different class and is not blocked by the slots
+            w = launch("--job", "work", "--mem", "64M", "--wall-sec", "10", "--", "true",
+                       env=TWO_SLOTS)
             self.assertEqual(w.returncode, 0, w.stderr)
         finally:
-            first.wait(timeout=30)
-        self.assertEqual(launch("--mem", "64M", "--wall-sec", "10", "--", "true").returncode, 0)
+            rcs = [j.wait(timeout=40) for j in jobs]
+        self.assertEqual(rcs, [0, 0])
+        self.assertEqual(launch("--mem", "64M", "--wall-sec", "10", "--", "true",
+                                env=TWO_SLOTS).returncode, 0)
 
-    def test_orphaned_job_keeps_its_limits_blocks_a_replacement_and_ends_by_itself(self):
-        first = subprocess.Popen([str(LAUNCHER), "--mem", "64M", "--wall-sec", "8", "--",
-                                  "sleep", "60"], cwd=ROOT)
+    def test_eight_slots_admit_eight_jobs_and_refuse_a_ninth(self):
+        names = [self.tmp / ("unit-%d" % i) for i in range(8)]
+        jobs = [subprocess.Popen([str(LAUNCHER), "--mem", "64M", "--wall-sec", "40", "--",
+                                  PY, "-c", UNIT_OF_JOB, str(n), "10"], cwd=ROOT)
+                for n in names]
+        try:
+            self.assertTrue(wait_until(lambda: written(*names), 30))
+            self.assertEqual(sorted(n.read_text() for n in names), sorted(EMU_UNITS))
+            r = launch("--mem", "64M", "--wall-sec", "10", "--", "true")
+            self.assertEqual(r.returncode, 75, r.stderr)
+            self.assertIn("all 8 emulator slots are busy", r.stderr)
+        finally:
+            rcs = [j.wait(timeout=60) for j in jobs]
+        self.assertEqual(rcs, [0] * 8)
+
+    def test_orphaned_job_keeps_its_limits_blocks_only_its_slot_and_ends_by_itself(self):
+        first = subprocess.Popen([str(LAUNCHER), "--mem", "64M", "--wall-sec", "12", "--",
+                                  "sleep", "60"], cwd=ROOT, env=ONE_SLOT)
         self.assertTrue(wait_until(unit_active, 15))
         first.kill()                                # SIGKILL exactly this launcher process
         first.wait()
         self.assertTrue(unit_active(), "the job must outlive its launcher")
-        r = launch("--mem", "64M", "--wall-sec", "5", "--", "true")
+        r = launch("--mem", "64M", "--wall-sec", "5", "--", "true", env=ONE_SLOT)
         self.assertEqual(r.returncode, 75, r.stderr)
+        self.assertIn("c55x-emu.service still running", r.stderr)
         self.assertTrue(unit_active(), "the replacement must not have killed the orphan")
-        self.assertTrue(wait_until(lambda: not unit_active(), 25),
+        got = self.tmp / "unit"                     # the next slot is still available
+        r = launch("--mem", "64M", "--wall-sec", "10", "--", PY, "-c", UNIT_OF_JOB, str(got), "0",
+                   env=TWO_SLOTS)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(got.read_text(), "c55x-emu-1.service")
+        self.assertTrue(unit_active(), "the orphan must keep its own slot")
+        self.assertTrue(wait_until(lambda: not unit_active(), 30),
                         "the orphan must stop at its wall-time limit")
-        self.assertEqual(launch("--mem", "64M", "--wall-sec", "10", "--", "true").returncode, 0)
+        self.assertEqual(launch("--mem", "64M", "--wall-sec", "10", "--", "true",
+                                env=ONE_SLOT).returncode, 0)
 
     def test_launcher_interruption_stops_only_its_own_job(self):
         sentinel = self.sentinel()
         p = subprocess.Popen([str(LAUNCHER), "--mem", "64M", "--wall-sec", "60", "--",
-                              "sleep", "60"], cwd=ROOT, stderr=subprocess.PIPE, text=True)
+                              "sleep", "60"], cwd=ROOT, env=ONE_SLOT,
+                             stderr=subprocess.PIPE, text=True)
         self.assertTrue(wait_until(unit_active, 15))
         p.send_signal(signal.SIGTERM)
         err = p.communicate(timeout=30)[1]
@@ -337,11 +358,14 @@ class LauncherTests(unittest.TestCase):
         self.assertTrue(wait_until(lambda: not unit_active(), 15))
         self.assertIsNone(sentinel.poll())
 
-    def test_status_reports_the_slot(self):
+    def test_status_reports_every_slot(self):
         r = launch("--status")
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("emulator slot: free", r.stdout)
-        self.assertIn("MemoryMax=4294967296", r.stdout)
+        for k, unit in enumerate(EMU_UNITS):
+            self.assertIn("emulator slot %d: free %s" % (k, unit), r.stdout)
+        self.assertNotIn("emulator slot 8", r.stdout)
+        self.assertIn("MemoryMax=10737418240", r.stdout)
+        self.assertIn("TasksMax=320", r.stdout)
 
     # ---- the core guard seen from the launcher --------------------------
 
@@ -354,6 +378,23 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("ResourcePolicyError", r.stdout)
         self.assertIn("may not run the emulator core", r.stdout)
+
+    @unittest.skipUnless(have_guarded_core(), "set ZEN_CORE_DIR to a guarded core build")
+    def test_core_runs_in_a_slot_other_than_zero(self):
+        first = subprocess.Popen([str(LAUNCHER), "--mem", "64M", "--wall-sec", "30", "--",
+                                  "sleep", "10"], cwd=ROOT, env=ONE_SLOT)
+        try:
+            self.assertTrue(wait_until(unit_active, 15))
+            code = ("import pathlib\n"
+                    "rel=[l for l in open('/proc/self/cgroup') if l.startswith('0::')][0][3:].strip()\n"
+                    "from tests.test_c55x_emu_long_words import machine, run\n"
+                    "cpu, _ = machine('AC0 = #0x100')\nrun(cpu)\n"
+                    "print(pathlib.PurePath(rel).name, hex(cpu.ac[0]))\n")
+            r = launch("--mem", "256M", "--wall-sec", "30", "--", PY, "-c", code, env=TWO_SLOTS)
+        finally:
+            first.wait(timeout=40)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.split(), ["c55x-emu-1.service", "0x100"])
 
     @unittest.skipUnless(have_guarded_core(), "set ZEN_CORE_DIR to a guarded core build")
     def test_similarly_named_group_outside_the_shared_slice_is_refused(self):
@@ -376,6 +417,172 @@ class LauncherTests(unittest.TestCase):
                            capture_output=True)                    # our exact fake units
         self.assertIn("ResourcePolicyError", r.stdout, r.stdout + r.stderr)
         self.assertNotIn("ADMITTED", r.stdout)
+
+
+class MockedLauncherTests(unittest.TestCase):
+    """Slot naming, the C55X_TEST_SLOTS hook, the slot choice and the
+    job-side verifier, against a fake unit table, a private lock directory
+    and mocked kernel trees. No systemd call and no subprocess is made, and
+    the real locks are never touched, so these run anywhere."""
+
+    def setUp(self):
+        TMP.mkdir(parents=True, exist_ok=True)
+        self.tmp = pathlib.Path(tempfile.mkdtemp(dir=TMP))
+        self.addCleanup(shutil.rmtree, self.tmp)
+        self.active = set()
+
+        def fake_systemctl(env, *args):
+            self.assertEqual(args[:2], ("is-active", "--quiet"))
+            return subprocess.CompletedProcess(args, 0 if args[2] in self.active else 3)
+
+        for p in (mock.patch.object(L, "systemctl", fake_systemctl),
+                  mock.patch.object(L, "LOCK_DIR", self.tmp / "locks"),
+                  mock.patch.object(L.subprocess, "run", side_effect=AssertionError("subprocess")),
+                  mock.patch.object(L.subprocess, "Popen", side_effect=AssertionError("subprocess")),
+                  mock.patch.dict(os.environ)):
+            p.start()
+            self.addCleanup(p.stop)
+        os.environ.pop("C55X_TEST_SLOTS", None)
+        os.environ.pop("C55X_CONTAINED_JOB", None)
+
+    def test_slot_names(self):
+        self.assertEqual(L.SLOTS, 8)
+        self.assertEqual(L.EMU_UNITS, EMU_UNITS)
+        self.assertEqual([L.slot_unit(k) for k in range(8)], list(EMU_UNITS))
+        self.assertEqual([L.slot_lock(k) for k in (0, 1, 7)],
+                         ["emulator.lock", "emulator-1.lock", "emulator-7.lock"])
+
+    def test_slot_hook_can_only_lower_the_count(self):
+        for inj, want in (("2", 2), ("1", 1), ("0", 0), ("8", 8), ("99", 8), ("-1", 8),
+                          ("x", 8), ("", 8)):
+            os.environ["C55X_TEST_SLOTS"] = inj
+            self.assertEqual(L.slot_count(), want, inj)
+
+    def test_first_free_slot_is_taken_and_a_freed_slot_is_reused(self):
+        a, b = L.Admission(), L.Admission()
+        self.assertEqual(a.acquire(None), EMU_UNIT)
+        self.assertEqual(b.acquire(None), "c55x-emu-1.service")       # slot 0 lock is held
+        self.assertEqual((self.tmp / "locks" / "emulator-1.lock").read_text(),
+                         "%d\n" % os.getpid())
+        a.release()
+        c = L.Admission()
+        self.assertEqual(c.acquire(None), EMU_UNIT)
+        b.release()
+        c.release()
+
+    def test_active_unit_blocks_only_its_slot_and_its_lock_is_not_kept(self):
+        self.active = {EMU_UNIT, "c55x-emu-2.service"}      # e.g. orphans of dead launchers
+        a, b = L.Admission(), L.Admission()
+        self.assertEqual(a.acquire(None), "c55x-emu-1.service")
+        self.assertEqual(b.acquire(None), "c55x-emu-3.service")
+        for name in ("emulator.lock", "emulator-2.lock"):   # the skipped slots' locks are free
+            fd = os.open(str(self.tmp / "locks" / name), os.O_RDWR)
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            finally:
+                os.close(fd)
+        a.release()
+        b.release()
+
+    def test_no_free_slot_names_every_slot(self):
+        self.active = set(EMU_UNITS[1:])
+        holder = L.Admission()
+        self.assertEqual(holder.acquire(None), EMU_UNIT)
+        other = L.Admission()
+        self.assertIsNone(other.acquire(None))
+        self.assertIsNone(other.fd)
+        self.assertEqual(other.busy, ["c55x-emu.service held"] +
+                         ["%s still running" % u for u in EMU_UNITS[1:]])
+        holder.release()
+        os.environ["C55X_TEST_SLOTS"] = "0"
+        self.assertIsNone(L.Admission().acquire(None))
+
+    def test_launcher_exits_75_when_every_slot_is_busy(self):
+        self.active = set(EMU_UNITS)
+        err = io.StringIO()
+        with mock.patch.object(L, "user_bus_env", lambda: ({}, self.tmp)), \
+                mock.patch.object(L, "mem_available", lambda: 64 << 30), \
+                mock.patch.object(L.sys, "stderr", err):
+            with self.assertRaises(SystemExit) as cm:
+                L.main(["--mem", "64M", "--work-dir", str(self.tmp / "w"), "--", "true"])
+        self.assertEqual(cm.exception.code, 75)
+        self.assertIn("outcome=busy all 8 emulator slots are busy", err.getvalue())
+        for u in EMU_UNITS:
+            self.assertIn(u + " still running", err.getvalue())
+        os.environ["C55X_TEST_SLOTS"] = "2"
+        err = io.StringIO()
+        with mock.patch.object(L, "user_bus_env", lambda: ({}, self.tmp)), \
+                mock.patch.object(L, "mem_available", lambda: 64 << 30), \
+                mock.patch.object(L.sys, "stderr", err):
+            with self.assertRaises(SystemExit) as cm:
+                L.main(["--mem", "64M", "--work-dir", str(self.tmp / "w"), "--", "true"])
+        self.assertEqual(cm.exception.code, 75)
+        self.assertIn("all 2 emulator slots are busy", err.getvalue())
+        self.assertNotIn("c55x-emu-2.service", err.getvalue())
+
+    def test_job_side_verification_execs_only_when_values_match(self):
+        import resource
+        job = fake_job_tree(self.tmp, EMU_UNIT, 64 << 20)
+        ok = {resource.RLIMIT_CPU: (600, 600), resource.RLIMIT_NOFILE: (512, 512),
+              resource.RLIMIT_CORE: (0, 0), resource.RLIMIT_AS: (2 << 30, 2 << 30)}
+        with mock.patch.object(L, "cgroup2_dir", lambda: job), \
+                mock.patch("resource.getrlimit", lambda r: ok[r]), \
+                mock.patch("os.execvp") as ex:
+            L.inner_verify(inner_args(EMU_UNIT, 64 << 20))
+            ex.assert_called_once_with("payload", ["payload", "arg"])
+            ex.reset_mock()
+            with self.assertRaises(SystemExit) as cm:        # expectation differs from kernel
+                L.inner_verify(inner_args(EMU_UNIT, 128 << 20))
+            self.assertEqual(cm.exception.code, 78)
+            self.assertTrue((self.tmp / "locks" / (EMU_UNIT + ".verify-failed")).exists())
+            (job / "memory.max").write_text("max\n")         # relaxed job
+            with self.assertRaises(SystemExit) as cm:
+                L.inner_verify(inner_args(EMU_UNIT, 64 << 20))
+            self.assertEqual(cm.exception.code, 78)
+            ex.assert_not_called()
+        bad = dict(ok)
+        bad[resource.RLIMIT_NOFILE] = (1024, 1024)
+        (job / "memory.max").write_text(str(64 << 20) + "\n")
+        with mock.patch.object(L, "cgroup2_dir", lambda: job), \
+                mock.patch("resource.getrlimit", lambda r: bad[r]), \
+                mock.patch("os.execvp") as ex:
+            with self.assertRaises(SystemExit) as cm:
+                L.inner_verify(inner_args(EMU_UNIT, 64 << 20))
+            self.assertEqual(cm.exception.code, 78)
+            ex.assert_not_called()
+
+    def test_job_side_verification_checks_the_slot_unit_and_the_shared_values(self):
+        import resource
+        unit = "c55x-emu-5.service"
+        job = fake_job_tree(self.tmp, unit, 64 << 20)
+        ok = {resource.RLIMIT_CPU: (600, 600), resource.RLIMIT_NOFILE: (512, 512),
+              resource.RLIMIT_CORE: (0, 0), resource.RLIMIT_AS: (2 << 30, 2 << 30)}
+        os.environ["C55X_CONTAINED_JOB"] = "emulator"
+        err = io.StringIO()
+        with mock.patch.object(L, "cgroup2_dir", lambda: job), \
+                mock.patch("resource.getrlimit", lambda r: ok[r]), \
+                mock.patch.object(L.sys, "stderr", err), \
+                mock.patch("os.execvp") as ex:
+            L.inner_verify(inner_args(unit, 64 << 20))
+            ex.assert_called_once_with("payload", ["payload", "arg"])
+            ex.reset_mock()
+            for other, why in (("c55x-emu-4.service", "is not in c55x.slice/c55x-emu-4.service"),
+                               ("c55x-emu-8.service", "is not an emulator slot unit"),
+                               ("c55x-work-1-abcdef12.service", "is not an emulator slot unit")):
+                with self.assertRaises(SystemExit) as cm:
+                    L.inner_verify(inner_args(other, 64 << 20))
+                self.assertEqual(cm.exception.code, 78)
+                self.assertIn(why, err.getvalue())
+            # the earlier single-slot shared values no longer match
+            for name, old in (("memory.max", str(4 << 30)), ("pids.max", "64"),
+                              ("cpu.max", "200000 100000")):
+                saved = (job.parent / name).read_text()
+                (job.parent / name).write_text(old + "\n")
+                with self.assertRaises(SystemExit) as cm:
+                    L.inner_verify(inner_args(unit, 64 << 20))
+                self.assertEqual(cm.exception.code, 78)
+                (job.parent / name).write_text(saved)
+            ex.assert_not_called()
 
 
 if __name__ == "__main__":
