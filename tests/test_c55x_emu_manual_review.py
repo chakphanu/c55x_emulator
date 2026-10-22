@@ -422,7 +422,6 @@ class ExecuteConditionallyTests(unittest.TestCase):
     the conditional instruction(s); operations of the address phase (pointer
     updates) are always executed."""
 
-    @unittest.expectedFailure       # not fixed yet (XCCPART address phase)
     def test_manual_examples(self):
         # SPRU374E 4.28.2 examples, XCCPART AR0 != #0 then ADD *AR2+, AC0; the
         # example's 00 0000 EF0C shows EF00h zero extended, so SXMD = 0
@@ -435,7 +434,6 @@ class ExecuteConditionallyTests(unittest.TestCase):
                 run(cpu)
                 self.assertEqual((cpu.ac[0], cpu.xar[2]), (ac0, 0x0406))
 
-    @unittest.expectedFailure       # not fixed yet (XCCPART address phase)
     def test_after_a_partner(self):
         # previous_instruction || XCCPART cond: the partner runs unconditionally
         for tc2, ac0 in ((0, 0x0C), (1, 0x0D)):

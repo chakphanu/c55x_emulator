@@ -12,7 +12,7 @@ use crate::core::Core;
 use crate::dest::writable;
 use crate::err::{emu, unsupported, R};
 use crate::fuse::{run_all, Assign, Run};
-use crate::expr::{get, Expr};
+use crate::expr::{get, indirect_eas, Expr};
 use crate::parts::run_parts;
 use crate::run::{loops_after, loops_branch};
 use crate::state::Reg;
@@ -59,6 +59,7 @@ pub struct Insn {
     fused: Option<Run>,          // only assignments (fuse.rs); parts is then empty
     ptr_mod: bool,               // a data part modifies a pointer (D_Unit skip, ir.py)
     address_parts: Vec<usize>,   // indices of the mar() parts
+    skip_eas: Vec<Ea>,           // with ptr_mod: data operand addresses for a D_Unit skip
     conditional_store_address: Option<Ea>,
     addr: u32,
     nxt: u32,
@@ -78,11 +79,13 @@ pub fn compile_insn(ir: &Node<'_>, pc: u32, size: u32) -> R<Insn> {
     let io = io_r || io_w;
     let v = |n: &Node<'_>| node(n, false, io, mmap);
     let mut parts = Vec::new();
+    let mut eas = Vec::new();            // per part: memory operand addresses (part_eas)
     let mut conditional_store_address = None;
     for p in item(ir, 4)?.try_iter()? {
         let p = p?;
         let first: bool = item(&p, 0)?.extract()?;
         let d = item(&p, 1)?;
+        let mut operands = Vec::new();
         let part = match text(&d, 0)?.as_str() {
             "nop" => Part::Nop,
             "status_bit" => Part::StatusBit(int(&d, 1)? as u32, int(&d, 2)? as u32, int(&d, 3)? != 0),
@@ -123,6 +126,8 @@ pub fn compile_insn(ir: &Node<'_>, pc: u32, size: u32) -> R<Insn> {
             "assign" => {
                 let lhs = dst(node(&item(&d, 1)?, false, io_w, mmap)?)?;
                 let rhs = node(&item(&d, 2)?, false, io_r, mmap)?;
+                indirect_eas(&rhs, &mut operands);
+                indirect_eas(&lhs, &mut operands);
                 if let Expr::Mem { ea, words: 1, port: false, .. } = &lhs {
                     if matches!(&rhs, Expr::Reg(..) | Expr::Num(_)) {
                         conditional_store_address = Some(*ea);
@@ -132,6 +137,7 @@ pub fn compile_insn(ir: &Node<'_>, pc: u32, size: u32) -> R<Insn> {
                     if let Expr::Reg(old_dst, _) = old.as_ref() {
                         if dst == old_dst {
                             parts.push((first, Part::Extremum(*dst, source.clone(), *max)));
+                            eas.push(operands);
                             continue;
                         }
                     }
@@ -140,6 +146,7 @@ pub fn compile_insn(ir: &Node<'_>, pc: u32, size: u32) -> R<Insn> {
                 if let (Expr::Half(acc, true), Expr::Reg(src @ (Reg::T(_) | Reg::Ar(_)), _)) = (&lhs, &rhs) {
                     if let Expr::Reg(a @ Reg::Ac(_), _) = acc.as_ref() {
                         parts.push((first, Part::HiLoad(*a, *src)));
+                        eas.push(operands);
                         continue;
                     }
                 }
@@ -150,6 +157,7 @@ pub fn compile_insn(ir: &Node<'_>, pc: u32, size: u32) -> R<Insn> {
                     if let (Expr::Mem { ea: src, words: 1, port: false, .. }, Expr::Num(k)) = (a.as_ref(), b.as_ref()) {
                         if ea == src {
                             parts.push((first, Part::AddK16(*ea, if *sub { -*k } else { *k })));
+                            eas.push(vec![*ea]);    // the one Smem address
                             continue;
                         }
                     }
@@ -169,7 +177,9 @@ pub fn compile_insn(ir: &Node<'_>, pc: u32, size: u32) -> R<Insn> {
                                  item(&d, 3)?.extract::<Option<i64>>()?.unwrap_or(-1) as u32),
             other => return unsupported(format!("part {}", other)),
         };
+        part_eas(&part, &mut operands);
         parts.push((first, part));
+        eas.push(operands);
     }
     let f = item(ir, 5)?;
     let flow = if f.is_none() { None } else {
@@ -204,6 +214,9 @@ pub fn compile_insn(ir: &Node<'_>, pc: u32, size: u32) -> R<Insn> {
     };
     let skip = item(ir, 8)?;
     let (ptr_mod, address_parts): (bool, Vec<usize>) = (item(&skip, 0)?.extract()?, item(&skip, 1)?.extract()?);
+    let skip_eas = if ptr_mod {
+        eas.into_iter().enumerate().filter(|(k, _)| !address_parts.contains(k)).flat_map(|(_, e)| e).collect()
+    } else { Vec::new() };
     let mut fused = None;
     let assigns = !parts.is_empty() && parts.len() <= 4 && address_parts.is_empty()
         && parts.iter().all(|(_, p)| matches!(p, Part::Assign(..)));
@@ -213,8 +226,22 @@ pub fn compile_insn(ir: &Node<'_>, pc: u32, size: u32) -> R<Insn> {
             _ => None,
         }).collect()));
     }
-    Ok(Insn { parts, flow, cond, repeat, repeat_condition, fused, ptr_mod, address_parts,
+    Ok(Insn { parts, flow, cond, repeat, repeat_condition, fused, ptr_mod, address_parts, skip_eas,
               conditional_store_address, addr: pc, nxt: pc + size })
+}
+
+/// The memory operand addresses of a part, in access order (an assignment's are taken
+/// from its operands when it is compiled).
+fn part_eas(p: &Part, out: &mut Vec<Ea>) {
+    match p {
+        Part::TestSet(_, e, _, _) | Part::Subc(e, _, _) | Part::PshBoth(e) | Part::PopBoth(e)
+        | Part::Mar(e) => indirect_eas(e, out),
+        Part::MarArith(r, _, src) => { indirect_eas(src, out); indirect_eas(r, out) }
+        Part::DualAlu(_, a, b, _) => { indirect_eas(a, out); indirect_eas(b, out) }
+        Part::Push(items) => for (e, _) in items { indirect_eas(e, out) },
+        Part::Pop(ds, _) => for d in ds { indirect_eas(d, out) },
+        _ => {}
+    }
 }
 
 fn truth(m: &mut Core, c: &Option<Expr>) -> R<bool> {
@@ -256,17 +283,17 @@ pub fn exec(m: &mut Core, i: &Insn) -> R<Option<u32>> {
 }
 
 /// The next instruction after a false 'if (cond) execute(D_Unit)': only its address phase
-/// (the mar() parts) runs (SPRU375G 5-163).
+/// runs (SPRU375G 5-163): the mar() parts, then the pointer modifications of its data
+/// operands (SPRU374E 4.28.2 example: the skipped ADD *AR2+, AC0 still increments AR2).
 pub fn exec_address_phase(m: &mut Core, i: &Insn) -> R<()> {
-    if i.ptr_mod {
-        return emu(format!("0x{:06x}: skipped by execute(D_Unit) with a pointer modifying operand: \
-                            its address phase is not modeled", i.addr));
-    }
     if i.flow.is_some() || i.repeat.is_some() || i.cond.is_some() {
         return emu(format!("0x{:06x}: flow, repeat or execute controlled by execute(D_Unit)", i.addr));
     }
     for &k in &i.address_parts {
         run_parts(m, std::slice::from_ref(&i.parts[k]))?;
+    }
+    for ea in &i.skip_eas {
+        ea.eval(m)?;
     }
     Ok(())
 }
