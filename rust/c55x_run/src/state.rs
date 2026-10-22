@@ -3,7 +3,7 @@
 //! the core-only ACOV flags, with the same value rules.
 
 use c55x_core::state::{State, PLAIN};
-use serde_json::Value;
+use serde_json::{json, Map, Value};
 
 /// Every field initial_state must give.
 pub const FIELDS: [&str; 37] = [
@@ -119,4 +119,33 @@ pub fn initial(st: &mut State, state: &serde_json::Map<String, Value>) -> Result
         set(st, name, v)?;
     }
     Ok(())
+}
+
+/// Every field of initial_state (and ACOV) as the core holds it, in the same form.
+pub fn dump(st: &State) -> Map<String, Value> {
+    let mut m = Map::new();
+    m.insert("ac".into(), json!(st.ac.to_vec()));
+    m.insert("t".into(), json!(st.t.to_vec()));
+    m.insert("xar".into(), json!(st.xar.to_vec()));
+    for (name, v) in [("xcdp", st.xcdp), ("xdp", st.xdp), ("xsp", st.xsp), ("ssp", st.ssp),
+                      ("tc1", st.tc1), ("tc2", st.tc2), ("carry", st.carry),
+                      ("st1", st.st1), ("st2", st.st2), ("st3", st.st3),
+                      ("ier0", st.ier0), ("ier1", st.ier1), ("ifr0", st.ifr0), ("ifr1", st.ifr1),
+                      ("ivpd", st.ivpd), ("ivph", st.ivph), ("dbstat", st.dbstat),
+                      ("brc0", st.brc0), ("brc1", st.brc1), ("brs1", st.brs1), ("csr", st.csr),
+                      ("rsa0", st.rsa[0]), ("rsa1", st.rsa[1]), ("rea0", st.rea[0]), ("rea1", st.rea[1]),
+                      ("reta", st.reta), ("cfct", st.cfct), ("pc", st.pc)] {
+        m.insert(name.into(), json!(v));
+    }
+    m.insert("loop_active".into(), json!(st.loop_active.iter()
+        .map(|&k| match k { 0 => Value::Null, 1 => json!("local"), _ => json!("ext") }).collect::<Vec<_>>()));
+    m.insert("cycles".into(), json!(st.cycles));
+    m.insert("skip_next".into(), json!(st.skip_next));
+    m.insert("skip_data_next".into(), json!(st.skip_data_next));
+    m.insert("in_idle".into(), json!(st.in_idle));
+    for (i, name) in PLAIN.iter().enumerate() {
+        m.insert((*name).into(), json!(st.plain[i]));
+    }
+    m.insert("acov".into(), json!(st.acov.to_vec()));
+    m
 }

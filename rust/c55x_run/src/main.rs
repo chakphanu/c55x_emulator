@@ -1,13 +1,13 @@
-//! c55x-run: run a C55x call script (c55x-call-script/1) over a memory image
+//! c55x-run: run a C55x call script (c55x-call-script/1 or /2) over a memory image
 //! (c55x-memory-image/1) and a precomputed listing without Python, and write the run
-//! (c55x-cli-run/1: output.pcm and run.json). The listing is decoded by the core's
+//! (c55x-cli-run/1 or /2: output.pcm and run.json). The listing is decoded by the core's
 //! frontend; its block_end column is checked against the image bytes. Each call is run
-//! like the reference
-//! runner's bounded native batches: enter like a call instruction returning to the
-//! sentinel, run chunks of steps until the pc reaches it, check limits between chunks.
-//! The core is built only inside the managed containment (bin/c55x-contained).
+//! like the reference runner's bounded native batches: enter like a call instruction
+//! returning to the sentinel, run chunks of steps until the pc reaches it, check limits
+//! between chunks. The core is built only inside the managed containment
+//! (bin/c55x-contained).
 //!
-//! Usage: c55x-run --script S.json --input FILE --out DIR
+//! Usage: c55x-run --script S.json [--input FILE] --out DIR (no --input: script without records)
 
 mod state;
 
@@ -26,7 +26,7 @@ use sha2::{Digest, Sha256};
 
 use state::num;
 
-const USAGE: &str = "usage: c55x-run --script S.json --input FILE --out DIR";
+const USAGE: &str = "usage: c55x-run --script S.json [--input FILE] --out DIR";
 
 fn sha(data: &[u8]) -> String {
     Sha256::digest(data).iter().map(|b| format!("{:02x}", b)).collect()
@@ -48,7 +48,7 @@ fn int_of(v: &Value, key: &str) -> Result<i128, String> {
     num(field(v, key)?).map_err(|e| format!("{}: {}", key, e))
 }
 
-struct Args { script: PathBuf, input: PathBuf, out: PathBuf }
+struct Args { script: PathBuf, input: Option<PathBuf>, out: PathBuf }
 
 fn args() -> Result<Args, String> {
     let mut a = std::env::args().skip(1);
@@ -62,9 +62,9 @@ fn args() -> Result<Args, String> {
             _ => return Err(format!("unknown option {}", k)),
         }
     }
-    match (script, input, out) {
-        (Some(script), Some(input), Some(out)) => Ok(Args { script, input, out }),
-        _ => Err("--script, --input and --out are required".into()),
+    match (script, out) {
+        (Some(script), Some(out)) => Ok(Args { script, input, out }),
+        _ => Err("--script and --out are required".into()),
     }
 }
 
@@ -141,7 +141,7 @@ fn core_error(e: Error) -> (String, String) {
 
 struct Limits { steps: u64, seconds: f64, chunk: u64 }
 
-struct Call { name: String, instructions: u64, cycles: u64, status: &'static str }
+struct Call { name: String, instructions: u64, cycles: u64, status: &'static str, observed: Map<String, Value> }
 
 /// A failed step: (type, message).
 type Fail = (String, String);
@@ -153,11 +153,36 @@ struct Runner {
     limits: Limits,
     calls: Vec<Call>,
     output: Vec<i16>,
+    image: Vec<u8>,                         // the memory at the start of the run
+    marks: HashMap<String, Vec<u8>>,        // mark_memory baselines
+}
+
+/// Every data word whose value differs from baseline: [word, before, after], ascending.
+fn memory_diff(baseline: &[u8], now: &[u8]) -> Vec<Value> {
+    let mut out = Vec::new();
+    for (k, (a, b)) in baseline.chunks_exact(8).zip(now.chunks_exact(8)).enumerate() {
+        if a == b { continue; }
+        for w in 0..4 {
+            let (x, y) = (&a[2 * w..2 * w + 2], &b[2 * w..2 * w + 2]);
+            if x != y {
+                out.push(json!([4 * k + w, u16::from_be_bytes([x[0], x[1]]), u16::from_be_bytes([y[0], y[1]])]));
+            }
+        }
+    }
+    out
 }
 
 impl Runner {
     /// One call, like the reference runner's bounded native batches.
-    fn call(&mut self, label: &str, entry: u32) -> Result<(), Fail> {
+    fn call(&mut self, label: &str, entry: u32, observe: Option<&Value>) -> Result<(), Fail> {
+        let trace = observe.and_then(|o| o["trace_pcs"].as_u64()).unwrap_or(0) as usize;
+        let mark = observe.and_then(|o| o["memory_diff_since"].as_str());
+        if let Some(n) = mark {
+            if !self.marks.contains_key(n) {
+                return Err(("ValueError".into(), format!("no memory mark {:?}", n)));
+            }
+        }
+        self.core.trace = if trace > 0 { Some((trace, Default::default())) } else { None };
         let (native0, cycles0) = (self.core.native, self.core.st.cycles);
         let start = Instant::now();
         let mut budget = 0u64;
@@ -197,8 +222,18 @@ impl Runner {
             status = if f.0 == "TimeoutError" { "timeout" } else { "execution_error" };
             failure = Some(f);
         }
+        let mut observed = Map::new();
+        if let Some((_, t)) = self.core.trace.take() {
+            observed.insert("trace_pcs".into(), json!(t.into_iter().collect::<Vec<u32>>()));
+        }
+        if observe.map_or(false, |o| o["final_state"] == true) {
+            observed.insert("final_state".into(), Value::Object(state::dump(&self.core.st)));
+        }
+        if let Some(n) = mark {
+            observed.insert("memory_diff".into(), json!(memory_diff(&self.marks[n], self.core.memory())));
+        }
         self.calls.push(Call { name: label.into(), instructions: self.core.native - native0,
-                               cycles: self.core.st.cycles - cycles0, status });
+                               cycles: self.core.st.cycles - cycles0, status, observed });
         if status != "returned" {
             let why = failure.map(|(t, m)| format!("{}: {}", t, m)).unwrap_or_default();
             return Err(("RuntimeError".into(), format!("call {} ended {}: {}", label, status, why)));
@@ -216,7 +251,16 @@ impl Runner {
                 }
                 let entry = int_of(op, "entry").map_err(bad)? as u32;
                 let label = op["label"].as_str().unwrap_or("").to_string();
-                self.call(&label, entry)
+                self.call(&label, entry, op.get("observe"))
+            }
+            Some("restore_image") => {
+                self.core.memory_mut().copy_from_slice(&self.image);
+                Ok(())
+            }
+            Some("mark_memory") => {
+                let name = op["name"].as_str().ok_or_else(|| bad("mark_memory without a name".into()))?;
+                self.marks.insert(name.into(), self.core.memory().to_vec());
+                Ok(())
             }
             Some("write") => {
                 let words: Vec<u16> = match op["source"].as_str() {
@@ -267,7 +311,8 @@ fn main() {
 fn run(a: &Args) -> Result<bool, String> {
     let script_bytes = read(&a.script)?;
     let script: Value = serde_json::from_slice(&script_bytes).map_err(|e| format!("{}: {}", a.script.display(), e))?;
-    if script["schema"] != "c55x-call-script/1" || script["register_carry_over"] != true {
+    let v2 = script["schema"] == "c55x-call-script/2";
+    if !(v2 || script["schema"] == "c55x-call-script/1") || script["register_carry_over"] != true {
         return Err("unsupported call script".into());
     }
     if script["on_unmodeled_port"] != "error" || script["on_code_page_write"] != "error" {
@@ -285,12 +330,24 @@ fn run(a: &Args) -> Result<bool, String> {
         || !(1..=16384).contains(&limits.chunk) {
         return Err("invalid execution bounds".into());
     }
-    let data = read(&a.input)?;
-    let records = field(&script, "records")?;
-    let size = int_of(records, "record_bytes")? as usize;
-    if size == 0 || (data.len() % size != 0 && records["partial_record"] == "error") {
-        return Err("input is not a whole number of records".into());
-    }
+    let records = match script.get("records") {
+        Some(r) => Some(r),
+        None if v2 => None,
+        None => return Err("missing \"records\"".into()),
+    };
+    let input = match (records, &a.input) {
+        (Some(rec), Some(path)) => {
+            let data = read(path)?;
+            let size = int_of(rec, "record_bytes")? as usize;
+            if size == 0 || (data.len() % size != 0 && rec["partial_record"] == "error") {
+                return Err("input is not a whole number of records".into());
+            }
+            Some((path, data, size))
+        }
+        (Some(_), None) => return Err("the script has records: --input is required".into()),
+        (None, Some(_)) => return Err("the script has no records: no --input".into()),
+        (None, None) => None,
+    };
 
     let (mem, snapshot) = load_image(&base.join(field(&script, "image")?.as_str().ok_or("image")?))?;
     let listing_path = base.join(field(&script, "listing")?.as_str().ok_or("listing")?);
@@ -303,7 +360,9 @@ fn run(a: &Args) -> Result<bool, String> {
     let sentinel = int_of(&script, "return_sentinel")? as u32;
     let mut stop = PcSet::default();
     stop.insert(sentinel);
-    let mut r = Runner { core, sentinel, stop: PcFilter::new(stop), limits, calls: Vec::new(), output: Vec::new() };
+    let image = core.memory().to_vec();
+    let mut r = Runner { core, sentinel, stop: PcFilter::new(stop), limits, calls: Vec::new(), output: Vec::new(),
+                         image, marks: HashMap::new() };
 
     std::fs::create_dir(&a.out).map_err(|e| format!("{}: {}", a.out.display(), e))?;
     let mut error: Option<Fail> = None;
@@ -311,12 +370,14 @@ fn run(a: &Args) -> Result<bool, String> {
     let steps = |v: &Value, k: &str| -> Result<Vec<Value>, String> {
         Ok(field(v, k)?.as_array().ok_or_else(|| format!("{} is not a list", k))?.clone())
     };
-    let (setup, per_record) = (steps(&script, "setup")?, steps(records, "steps")?);
+    let setup = steps(&script, "setup")?;
+    let per_record = match records { Some(rec) => steps(rec, "steps")?, None => Vec::new() };
     'outer: {
         for op in &setup {
             if let Err(f) = r.step(op, None) { error = Some(f); break 'outer; }
         }
-        for rec in data.chunks_exact(size) {
+        let Some((_, data, size)) = &input else { break 'outer };
+        for rec in data.chunks_exact(*size) {
             for op in &per_record {
                 if let Err(f) = r.step(op, Some(rec)) { error = Some(f); break 'outer; }
             }
@@ -329,9 +390,12 @@ fn run(a: &Args) -> Result<bool, String> {
     let host: &NativeHost = r.core.host.as_any().downcast_ref().ok_or("native host")?;
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let exe_sha = sha(&read(&exe)?);
-    let calls: Vec<Value> = r.calls.iter().enumerate().map(|(i, c)| json!({
-        "index": i, "name": c.name, "instructions": c.instructions, "cycles": c.cycles, "status": c.status,
-    })).collect();
+    let calls: Vec<Value> = r.calls.iter().enumerate().map(|(i, c)| {
+        let mut e = json!({"index": i, "name": c.name, "instructions": c.instructions, "cycles": c.cycles,
+                           "status": c.status});
+        e.as_object_mut().unwrap().extend(c.observed.clone());
+        e
+    }).collect();
     let mut core_info = Map::new();
     core_info.insert("path".into(), json!(exe.display().to_string()));
     core_info.insert("sha256".into(), json!(exe_sha));
@@ -339,7 +403,7 @@ fn run(a: &Args) -> Result<bool, String> {
         core_info.insert("source_revision".into(), json!(rev));
     }
     let run = json!({
-        "format": "c55x-cli-run/1",
+        "format": if v2 { "c55x-cli-run/2" } else { "c55x-cli-run/1" },
         "status": if error.is_none() { "completed" } else { "failed" },
         "error": error.as_ref().map(|(t, m)| json!({"type": t, "message": m})),
         "producer": {"name": "c55x-run", "sha256": exe_sha, "version": env!("CARGO_PKG_VERSION")},
@@ -347,7 +411,7 @@ fn run(a: &Args) -> Result<bool, String> {
         "script": {"path": abs(&a.script), "sha256": sha(&script_bytes)},
         "image": {"snapshot_sha256": snapshot},
         "listing": {"sha256": listing_sha},
-        "input": {"path": abs(&a.input), "sha256": sha(&data), "records": done},
+        "input": input.as_ref().map(|(p, data, _)| json!({"path": abs(p), "sha256": sha(data), "records": done})),
         "output": {"file": "output.pcm", "format": "s16le", "samples": r.output.len(), "sha256": sha(&pcm)},
         "calls": calls,
         "totals": {"calls": r.calls.len(),

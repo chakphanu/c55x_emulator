@@ -72,11 +72,19 @@ class NativeRunTests(unittest.TestCase):
              call({"xar0": "0x1600", "xar1": "0x1601", "xar2": "0x1700"}),
              {"op": "read", "word_address": "0x1700", "words": 1, "format": "s16", "to": "output"}]
 
-    def run_cli(self, program, steps, words):
+    def run_cli(self, program, steps, words, setup=None):
+        """setup: a version-2 script without records (no --input), running these steps."""
         d = Path(tempfile.mkdtemp())
         write_inputs(d, program, steps, words)
+        args = ["--input", str(d / "input.bin")]
+        if setup is not None:
+            script = json.loads((d / "test.call.json").read_text())
+            script.update(schema="c55x-call-script/2", setup=setup)
+            del script["records"]
+            (d / "test.call.json").write_text(json.dumps(script))
+            args = []
         out = d / "out"
-        p = subprocess.run([BINARY, "--script", str(d / "test.call.json"), "--input", str(d / "input.bin"),
+        p = subprocess.run([BINARY, "--script", str(d / "test.call.json"), *args,
                             "--out", str(out)], capture_output=True, text=True)
         run = json.loads((out / "run.json").read_text())
         return p.returncode, run, (out / "output.pcm").read_bytes()
@@ -112,6 +120,27 @@ class NativeRunTests(unittest.TestCase):
         rc, run, _ = self.run_cli(self.ADD, steps, [1])
         self.assertEqual((rc, run["status"], run["calls"][0]["status"]), (1, "failed", "execution_error"))
         self.assertEqual(run["totals"]["code_page_writes"], 1)
+
+    def test_observed_call_without_records(self):
+        observe = {"final_state": True, "memory_diff_since": "start", "trace_pcs": 3}
+        regs = {"xar0": "0x1600", "xar1": "0x1601", "xar2": "0x1700", "cycles": 0}
+        setup = [{"op": "write", "word_address": "0x1600", "words": [1, 5]},
+                 {"op": "mark_memory", "name": "start"},
+                 dict(call(regs), observe=observe),
+                 {"op": "restore_image"},           # the 1, 5 and the result are gone again
+                 {"op": "mark_memory", "name": "start"},
+                 dict(call(regs), observe=observe)]
+        rc, run, pcm = self.run_cli(self.ADD, [], [], setup=setup)
+        self.assertEqual((rc, run["format"], run["input"], pcm), (0, "c55x-cli-run/2", None, b""))
+        first, second = run["calls"]
+        self.assertEqual(first["memory_diff"], [[0x1700, 0, 6]])
+        self.assertEqual(first["trace_pcs"], [BASE + 2, BASE + 4, BASE + 6])    # last 3 of 4
+        state = first["final_state"]
+        self.assertEqual((state["ac"][0], state["xar"][2], state["pc"]), (6, 0x1700, SENTINEL))
+        self.assertEqual((state["cycles"], state["acov"], state["loop_active"]),
+                         (first["cycles"], [0, 0, 0, 0], [None, None]))
+        self.assertEqual(sorted(state), sorted(initial_state()))
+        self.assertEqual((second["memory_diff"], second["final_state"]["ac"][0]), ([], 0))
 
     def test_call_without_return_fails_the_run(self):
         rc, run, _ = self.run_cli(["goto #0x%06x" % BASE], self.STEPS, [1, 2])
