@@ -13,7 +13,7 @@ use crate::stmt::Part;
 /// A part's read-phase result. A plain struct passed by reference: moving a packed enum
 /// through R<_> caused store-forwarding stalls on every instruction.
 #[derive(Default)]
-struct Pending { v: i128, carry: Option<u8>, ovf: bool, vs: Vec<i128> }
+struct Pending { v: i128, carry: Option<u8>, ovf: bool, addr: u32, vs: Vec<i128> }
 
 fn read(m: &mut Core, p: &Part, out: &mut Pending) -> R<()> {
     m.ovf_pending = false; // overflow is per part (SPRU374E 4.27): none from a neighbour
@@ -34,6 +34,22 @@ fn read(m: &mut Core, p: &Part, out: &mut Pending) -> R<()> {
             if take { value } else { old }
         }
         Part::TestSet(_, loc, _, _) => get(m, loc)?,
+        Part::AddK16(ea, k) => {
+            // SPRU374E 4.7.16: both operands extended per SXMD and moved to bits 31-16,
+            // added on 40 bits; CARRY and overflow at bit 31, overflow reported in ACOV0;
+            // SATD saturates the stored word to 7FFFh / 8000h.
+            let sxmd = m.st.st1 & ST1_SXMD != 0;
+            let extend = |x: i128| if sxmd { sext(x, 16) } else { x & 0xFFFF };
+            out.addr = ea.eval(m)?;
+            let a = extend(m.read(out.addr)? as i128) << 16;
+            let b = extend(*k as i128) << 16;
+            let sum = a + b;
+            out.carry = Some((((a & 0xFFFF_FFFF) + (b & 0xFFFF_FFFF)) >> 32) as u8);
+            out.ovf = sum < -(1i128 << 31) || sum > (1i128 << 31) - 1;
+            if out.ovf && m.st.st1 & ST1_SATD != 0 {
+                if sum > 0 { 0x7FFF } else { 0x8000 }
+            } else { (sum >> 16) & 0xFFFF }
+        }
         Part::Subc(op, src, _) => {
             let x = m.st.get(*src);
             let divisor = arith(m, op, false, true, false)? << 15;
@@ -112,6 +128,11 @@ fn commit(m: &mut Core, p: &Part, pend: &mut Pending) -> R<()> {
         Part::TestSet(tc, loc, bit, val) => {
             m.st.set(*tc, (v >> bit) & 1);
             set(m, loc, if *val { v | (1 << bit) } else { v & !(1 << bit) })?;
+        }
+        Part::AddK16(..) => {
+            m.write(pend.addr, v)?;
+            if let Some(carry) = pend.carry { m.st.carry = carry as u32; }
+            if pend.ovf { m.st.acov[0] = 1; }
         }
         Part::RegBit(r, bit, val) => m.st.set(*r, if *val { v | (1 << bit) } else { v & !(1 << bit) }),
         Part::Subc(_, _, d) => {

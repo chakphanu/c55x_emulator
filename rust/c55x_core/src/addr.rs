@@ -8,12 +8,12 @@ use crate::state::{Reg, BK03, BK47, BKC, BSA01};
 
 const ST2_ARMS: u32 = 1 << 15;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Mode {
     Ind, Idx(i32), IdxReg(Reg), Post(i32), PostReg(i32, Reg), PostK(i32), Pre(i32), Short(i32),
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Ea {
     Abs(u32),
     Port(u32),

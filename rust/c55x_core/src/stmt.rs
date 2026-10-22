@@ -22,6 +22,7 @@ pub enum Part {
     StatusBit(u32, u32, bool),
     RegToggle(Reg, u32),
     TestSet(Reg, Expr, u32, bool),
+    AddK16(Ea, i64),                    // Smem = Smem + K16 (SPRU374E 4.7.16)
     RegBit(Reg, u32, bool),
     Subc(Expr, Reg, Reg),
     DualAlu(Reg, Expr, Expr, bool),
@@ -140,6 +141,17 @@ pub fn compile_insn(ir: &Node<'_>, pc: u32, size: u32) -> R<Insn> {
                     if let Expr::Reg(a @ Reg::Ac(_), _) = acc.as_ref() {
                         parts.push((first, Part::HiLoad(*a, *src)));
                         continue;
+                    }
+                }
+                // ADD K16, Smem: one Smem operand, read and written back; "- #k" is the
+                // same instruction with K16 = -k
+                if let (Expr::Mem { ea, words: 1, port: false, .. },
+                        Expr::AddSub { sub, a, b, product: false, chain: false, .. }) = (&lhs, &rhs) {
+                    if let (Expr::Mem { ea: src, words: 1, port: false, .. }, Expr::Num(k)) = (a.as_ref(), b.as_ref()) {
+                        if ea == src {
+                            parts.push((first, Part::AddK16(*ea, if *sub { -*k } else { *k })));
+                            continue;
+                        }
                     }
                 }
                 Part::Assign(Assign::new(lhs, rhs))

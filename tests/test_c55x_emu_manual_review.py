@@ -200,7 +200,6 @@ class StatusFlagTests(unittest.TestCase):
         self.assertEqual((cpu.ac[1], cpu.carry), (0x46_8400_0001, 1))
         self.assertEqual(cpu.core.acov(), [0, 1, 0, 0])
 
-    @unittest.expectedFailure       # not fixed yet (F13)
     def test_add_k16_to_memory_saturates_and_reports_acov0(self):
         # SPRU374E 4.7.16 ADD K16, Smem: overflow at bit 31 sets ACOV0,
         # SATD saturates the stored word to 7FFFh / 8000h
