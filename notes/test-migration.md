@@ -390,3 +390,18 @@ Infra decisions in detail:
 - `'NoneType' object has no attribute 'startswith'` (resolver, target missing) is frozen
   in rejected.tsv for equality with ir.py. Once Python is gone it can become a Rust
   message, changing the fixture in the same commit.
+
+## 6. Decisions (lead, after phase A)
+
+1. Each Python test file is deleted in the same commit as its passing Rust replacement.
+2. Idle: the 4 idle tests are deleted. There is no ICR/ISTR model.
+3. McBSP and DMA are on-chip and stay. The native host gets set_audio_clock as plain
+   data, so the 3 McBSP tests become Rust tests; take_audio stays.
+4. ImageCaps go with the image loader, wherever step 7 put it (check after the rebase).
+5. Text-only fixtures are allowed only for a form that dis55 prints in real listings but
+   asm55 will not re-assemble. Each one is listed here with the reason.
+6. The Python-specific rejection text is replaced with a neutral Rust message when Python
+   goes; the frozen tsv changes in that commit.
+7. Launcher tests: on hold until the owner decides whether bin/c55x-contained (Python)
+   stays as an exception.
+8. The fork is never pushed by agents; commits stay local.
