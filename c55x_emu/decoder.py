@@ -16,6 +16,7 @@ from .listing import TI_BIN, parse
 
 WINDOW = 1024
 MAX_INSN = 7                            # longest bundle in bytes (+1 margin)
+MAX_CACHED_INSNS = 1 << 20             # 1M instructions: cap the code cache
 MODE = "\t.mmregs\n\t.cpl_on\n\t.arms_on\n\t.c54cm_off\n"
 
 
@@ -54,6 +55,10 @@ class CodeCache:
 
     def add(self, insns):
         for a, insn in insns.items():
+            if len(self.insns) >= MAX_CACHED_INSNS:
+                raise RuntimeError(
+                    f"code cache full: {len(self.insns)} instructions "
+                    f"(max {MAX_CACHED_INSNS}); possible runaway decode")
             self.insns[a] = insn
             self.pages.setdefault(a >> 8, set()).add(a)
 

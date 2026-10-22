@@ -7,9 +7,11 @@ I/O space; unhooked ports behave as plain latches and are counted in `unmodeled`
 """
 
 import collections
+import hashlib
 
 MEM_BYTES = 1 << 24
 MMR_END = 0x60
+MAX_LOAD_BYTES = 1 << 22  # 4 MiB: a single firmware section cannot exceed this
 
 
 class Bus:
@@ -22,11 +24,17 @@ class Bus:
         self.mmr = None                 # set by the CPU: (read(addr), write(addr, value))
         self.code_pages = {}            # set by decoder.CodeCache: pages holding decoded code
         self.invalidate_code = None
+        self.load_log = []              # (byte_addr, size, sha256) per load() call
 
     def load(self, byte_addr, data):
         if byte_addr + len(data) > MEM_BYTES:
             raise ValueError(f"section at 0x{byte_addr:x} exceeds the address space")
+        if len(data) > MAX_LOAD_BYTES:
+            raise ValueError(f"section at 0x{byte_addr:x}: {len(data)} bytes "
+                             f"exceeds the per-load maximum {MAX_LOAD_BYTES}")
         self.mem[byte_addr:byte_addr + len(data)] = data
+        self.load_log.append((byte_addr, len(data),
+                               hashlib.sha256(data).hexdigest()[:16]))
 
     def hook_data(self, lo, hi, read, write):
         self.data_hooks.append((lo, hi, read, write))

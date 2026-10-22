@@ -1,5 +1,7 @@
 """A Zen Touch board: bus, CPU, LCD, I2C, MCU, timers and RTC running a loader.Program."""
 
+import hashlib
+
 from .ata import Ata
 from .bus import Bus
 from .diskimage import synthetic_disk
@@ -33,6 +35,7 @@ class Machine:
         self.bus = Bus()
         for addr, data in program.sections:
             self.bus.load(addr, data)
+        self.image_info = self._image_info(program)
         self.lcd = Lcd(self.bus)
         self.code = CodeCache(self.bus, program.insns)
         self.cpu = Cpu(self.bus, self.code, program.symbols)
@@ -56,6 +59,23 @@ class Machine:
         self.audio_out = None              # e.g. wav.WavRecorder; samples are dropped without
         self.nor = Nor(self.bus, nor_image if nor_image is not None else synthetic_nor())
         self.hle = {}                      # function address -> handler(machine), see run()
+
+    def _image_info(self, program):
+        """Report the loaded firmware image: name, total bytes, section count,
+        sha256 of the concatenated section data, and per-section summaries."""
+        h = hashlib.sha256()
+        total = 0
+        sections = []
+        for addr, data in program.sections:
+            h.update(data)
+            total += len(data)
+            sections.append({"address": addr, "size": len(data),
+                             "sha256_16": hashlib.sha256(data).hexdigest()[:16]})
+        return {"name": program.name, "total_bytes": total,
+                "section_count": len(program.sections),
+                "sha256": h.hexdigest(),
+                "sections": sections,
+                "bus_load_log": self.bus.load_log}
 
     def run(self, max_steps, stop=frozenset(), until_seconds=None):
         """-> True when the CPU reached an idle loop (cpu.run; stop: pcs to halt at;

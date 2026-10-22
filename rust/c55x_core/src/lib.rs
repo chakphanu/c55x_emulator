@@ -18,6 +18,7 @@ mod mcbsp;
 mod parts;
 mod run;
 mod state;
+mod policy;
 mod sync;
 mod timers;
 mod stmt;
@@ -50,6 +51,12 @@ struct PyCore {
 impl PyCore {
     /// Load the state from the Python Cpu (it is authoritative between calls).
     fn enter<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        // Re-validate resource containment on every execution entry.
+        // This detects a process that moved out of the cgroup or whose
+        // limits were relaxed after construction.
+        if let Err(e) = crate::policy::check_containment() {
+            return Err(to_py(py, e));
+        }
         let c = &mut self.core;
         let cpu = c.cpu.bind(py).clone();
         c.load(py, &cpu)?;
@@ -72,6 +79,11 @@ impl PyCore {
 impl PyCore {
     #[new]
     fn new(py: Python<'_>, cpu: &Bound<'_, PyAny>) -> PyResult<Self> {
+        // Check resource containment at construction. The core refuses to
+        // build outside the managed cgroup.
+        if let Err(e) = crate::policy::check_containment() {
+            return Err(to_py(py, e));
+        }
         Ok(PyCore { core: Core::new(py, cpu)? })
     }
 
