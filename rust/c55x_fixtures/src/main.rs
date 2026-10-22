@@ -6,7 +6,8 @@
 //!   fixture.txt  'origin 0x020000': the program byte address of .text
 //!   prog.lst     dis55 -qq -r -g of the linked program (the runtime listing flags)
 //!   prog.hex     the loaded sections of the linked program (see write_image)
-//! 'write' regenerates prog.lst and prog.hex, 'check' fails when they differ from what
+//!   prog.sym     its symbols, 'NAME 0xVALUE' sorted by value (labels: test entry points)
+//! 'write' regenerates prog.lst, prog.hex and prog.sym, 'check' fails when they differ from what
 //! the tools produce now. Other files in a fixture directory (expected results) are
 //! not touched.
 //!
@@ -67,6 +68,32 @@ fn coff_sections(d: &[u8]) -> Result<Vec<(String, u32, Vec<u8>)>, String> {
     Ok(out)
 }
 
+/// Symbols of a section (not absolute or undefined) as 'NAME 0xVALUE' lines, sorted by
+/// value then name (c55x_emu/coff.py symbol_list rules).
+fn coff_symbols(d: &[u8]) -> Result<String, String> {
+    let (symptr, nsyms) = (u32le(d, 8) as usize, u32le(d, 12) as usize);
+    let strings = &d[symptr + nsyms * 18..];
+    let mut syms = Vec::new();
+    let mut i = 0;
+    while i < nsyms {
+        let e = &d[symptr + i * 18..symptr + (i + 1) * 18];
+        let (value, scn, numaux) = (u32le(e, 8), i16::from_le_bytes([e[12], e[13]]), e[17] as usize);
+        if scn > 0 {
+            let name = if e[..4] == [0; 4] {
+                let off = u32le(e, 4) as usize;
+                let end = strings[off..].iter().position(|&c| c == 0).ok_or("bad string table")?;
+                String::from_utf8_lossy(&strings[off..off + end]).into_owned()
+            } else {
+                String::from_utf8_lossy(&e[..8]).trim_end_matches('\0').to_owned()
+            };
+            syms.push((value, name));
+        }
+        i += 1 + numaux;
+    }
+    syms.sort();
+    Ok(syms.iter().map(|(v, n)| format!("{} 0x{:06x}\n", n, v)).collect())
+}
+
 /// prog.hex: per section a line 'NAME 0xADDRESS SIZE', then its bytes in hex, 32 per line.
 fn write_image(sections: &[(String, u32, Vec<u8>)]) -> String {
     let mut s = String::from("# c55x-fixtures image: section, byte address, size; bytes in hex\n");
@@ -101,18 +128,32 @@ fn origin(dir: &Path) -> Result<u32, String> {
     Err("fixture.txt has no 'origin' line".into())
 }
 
-/// (prog.lst, prog.hex) of a fixture as the tools make them now.
-fn build(ti: &Path, dir: &Path, work: &Path) -> Result<(String, String), String> {
+/// Assemble and link prog.asm in work; asm55 options extra. -> the linked executable.
+fn link(ti: &Path, dir: &Path, work: &Path, extra: &[&str]) -> Result<Vec<u8>, String> {
     fs::create_dir_all(work).map_err(|e| e.to_string())?;
     fs::copy(dir.join("prog.asm"), work.join("prog.asm")).map_err(|e| format!("prog.asm: {}", e))?;
     fs::write(work.join("prog.cmd"), format!(
         "MEMORY {{ CODE (RX) : origin = 0x{:x}, length = 0x01000000 }}\nSECTIONS {{ .text : {{}} > CODE }}\n",
         origin(dir)?)).map_err(|e| e.to_string())?;
-    run(&ti.join("asm55"), &["prog.asm", "prog.obj"], work)?;
+    let args: Vec<&str> = extra.iter().copied().chain(["prog.asm", "prog.obj"]).collect();
+    run(&ti.join("asm55"), &args, work)?;
     run(&ti.join("lnk55"), &["-q", "prog.obj", "prog.cmd", "-o", "prog.out"], work)?;
-    let lst = run(&ti.join("dis55"), &["-qq", "-r", "-g", "prog.out"], work)?;
-    let out = fs::read(work.join("prog.out")).map_err(|e| e.to_string())?;
-    Ok((lst, write_image(&coff_sections(&out)?)))
+    fs::read(work.join("prog.out")).map_err(|e| e.to_string())
+}
+
+/// (prog.lst, prog.hex, prog.sym) of a fixture as the tools make them now. The listing
+/// and the image come from a plain assembly (branch targets print as addresses, as in a
+/// runtime listing); the symbols, labels included, from a second one with
+/// --output_all_syms (the code is the same).
+fn build(ti: &Path, dir: &Path, work: &Path) -> Result<(String, String, String), String> {
+    let out = link(ti, dir, &work.join("plain"), &[])?;
+    let lst = run(&ti.join("dis55"), &["-qq", "-r", "-g", "prog.out"], &work.join("plain"))?;
+    let labeled = link(ti, dir, &work.join("labels"), &["--output_all_syms"])?;
+    let (code, code_labeled) = (coff_sections(&out)?, coff_sections(&labeled)?);
+    if code != code_labeled {
+        return Err("--output_all_syms changed the code".into());
+    }
+    Ok((lst, write_image(&code), coff_symbols(&labeled)?))
 }
 
 fn ti_dir(arg: Option<String>) -> Result<PathBuf, String> {
@@ -147,9 +188,9 @@ fn main() {
     let mut failed = 0;
     for name in &names {
         let dir = root.join(name);
-        let result = build(&ti, &dir, &scratch.join(name)).and_then(|(lst, img)| {
+        let result = build(&ti, &dir, &scratch.join(name)).and_then(|(lst, img, sym)| {
             let mut stale = Vec::new();
-            for (file, new) in [("prog.lst", lst), ("prog.hex", img)] {
+            for (file, new) in [("prog.lst", lst), ("prog.hex", img), ("prog.sym", sym)] {
                 let path = dir.join(file);
                 if fs::read_to_string(&path).ok().as_deref() == Some(new.as_str()) {
                     continue;

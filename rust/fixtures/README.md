@@ -11,10 +11,12 @@ Each directory NAME holds:
   with `c55x_core::frontend::listing::parse`.
 - `prog.hex`: the loaded sections of the linked program. Per section there is a line
   `NAME 0xADDRESS SIZE`, then its bytes in hex, 32 per line.
+- `prog.sym`: its symbols, `NAME 0xVALUE` sorted by value. Labels mark the test entry
+  points.
 - Expected results (`*.tsv`), when a test compares against frozen values. The header line
   of each file names where the values come from.
 
-Regenerate or check `prog.lst` / `prog.hex` with the TI tools, in a work job:
+Regenerate or check `prog.lst` / `prog.hex` / `prog.sym` with the TI tools, in a work job:
 
     bin/c55x-contained --job work --env C55X_TI_BIN -- \
         build/rust-target/release/c55x-fixtures check      # or: write [NAME...]
