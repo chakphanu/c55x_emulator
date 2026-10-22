@@ -261,9 +261,9 @@ mod sxmd_independent_operand {
 mod status_flag {
     use super::*;
 
+    // SPRU371F 2.10.1.1: ACOV0 is bit 10 of ST0_55, read/write
     #[test]
     fn acov_is_part_of_st0() {
-        // SPRU371F 2.10.1.1: ACOV0 is bit 10 of ST0_55, read/write
         let mut cpu = machine("acov_is_part_of_st0");
         cpu.st.ac[0] = 0x7FFFFFFF;
         run(&mut cpu);
@@ -278,9 +278,9 @@ mod status_flag {
         assert_eq!(cpu.st.acov, [0, 0, 0, 0]);
     }
 
+    // SPRU374E 4.5.1 example: MOV AC0, AC1 with M40 = 0, SATD = 0
     #[test]
     fn accumulator_move_reports_overflow() {
-        // SPRU374E 4.5.1 example: MOV AC0, AC1 with M40 = 0, SATD = 0
         let mut cpu = machine("accumulator_move");
         cpu.st.ac[0] = 0x01_E500_0030;
         cpu.st.ac[1] = 0x00_2800_0200;
@@ -289,9 +289,9 @@ mod status_flag {
         assert_eq!(cpu.st.acov, [0, 1, 0, 0]);
     }
 
+    // SPRU374E 4.69 example: SAT AC0, AC1
     #[test]
     fn sat_reports_overflow() {
-        // SPRU374E 4.69 example: SAT AC0, AC1
         let mut cpu = machine("sat_reports_overflow");
         cpu.st.ac[0] = 0xEF_0FF0_8023;
         run(&mut cpu);
@@ -299,9 +299,9 @@ mod status_flag {
         assert_eq!(cpu.st.acov, [0, 1, 0, 0]);
     }
 
+    // SPRU374E 4.69 example: SATR AC0, AC1 with RDM = 0
     #[test]
     fn satr_clears_the_low_word_after_saturation() {
-        // SPRU374E 4.69 example: SATR AC0, AC1 with RDM = 0
         let mut cpu = machine("satr_clears_the_low_word_after_saturation");
         cpu.st.ac[0] = 0x00_7FFF_8000;
         run(&mut cpu);
@@ -309,9 +309,9 @@ mod status_flag {
         assert_eq!(cpu.st.acov, [0, 1, 0, 0]);
     }
 
+    // SPRU374E 4.25 example: SUBC *AR1, AC0, AC1 with SXMD = 0
     #[test]
     fn subc_reports_overflow_without_saturation() {
-        // SPRU374E 4.25 example: SUBC *AR1, AC0, AC1 with SXMD = 0
         let mut cpu = machine("subc_reports_overflow_without_saturation");
         write(&mut cpu, 0x300, 0x200);
         cpu.st.ac[0] = 0x23_4300_0000;
@@ -320,10 +320,10 @@ mod status_flag {
         assert_eq!(cpu.st.acov, [0, 1, 0, 0]);
     }
 
+    // SPRU374E 4.7.16 ADD K16, Smem: overflow at bit 31 sets ACOV0, SATD saturates
+    // the stored word to 7FFFh / 8000h
     #[test]
     fn add_k16_to_memory_saturates_and_reports_acov0() {
-        // SPRU374E 4.7.16 ADD K16, Smem: overflow at bit 31 sets ACOV0, SATD saturates
-        // the stored word to 7FFFh / 8000h
         let mut cpu = machine("add_k16_to_memory_saturates_and_reports_acov0");
         write(&mut cpu, 0x1600, 0x7FFF);
         run(&mut cpu);
@@ -331,9 +331,9 @@ mod status_flag {
         assert_eq!(cpu.st.acov, [1, 0, 0, 0]);
     }
 
+    // SPRU374E 4.7.16: CARRY at bit 31; the Smem address is evaluated once
     #[test]
     fn add_k16_carry_and_one_address_update() {
-        // SPRU374E 4.7.16: CARRY at bit 31; the Smem address is evaluated once
         let mut cpu = machine("add_k16_carry_and_one_address_update");
         write(&mut cpu, 0x1600, 0xFFFF);
         write(&mut cpu, 0x1601, 0x1234);
@@ -343,9 +343,9 @@ mod status_flag {
         assert_eq!(cpu.st.xar[0], 0x1601);
     }
 
+    // SPRU374E 4.7.16: "- #k" is ADD #-k, Smem (asm55 / dis55)
     #[test]
     fn add_k16_negative_constant_saturates_to_8000h() {
-        // SPRU374E 4.7.16: "- #k" is ADD #-k, Smem (asm55 / dis55)
         let mut cpu = machine("add_k16_negative_constant_saturates_to_8000h");
         write(&mut cpu, 0x1600, 0x8000);
         run(&mut cpu);
@@ -353,9 +353,9 @@ mod status_flag {
         assert_eq!(cpu.st.acov, [1, 0, 0, 0]);
     }
 
+    // SPRU374E 4.5.1 with SATD = 1; ACOV1 is bit 9 of ST0_55 (SPRU371F 2.10.1.1)
     #[test]
     fn accumulator_move_saturates_and_sets_st0_bit_9() {
-        // SPRU374E 4.5.1 with SATD = 1; ACOV1 is bit 9 of ST0_55 (SPRU371F 2.10.1.1)
         let mut cpu = machine("accumulator_move_saturates_and_sets_st0_bit_9");
         cpu.st.ac[0] = 0x01_E500_0030;
         run(&mut cpu);
@@ -364,9 +364,9 @@ mod status_flag {
         assert_eq!((cpu.st.t[0] >> 9) & 1, 1);
     }
 
+    // SPRU374E 4.5.1: overflow is detected according to M40
     #[test]
     fn accumulator_move_with_m40_does_not_overflow() {
-        // SPRU374E 4.5.1: overflow is detected according to M40
         let mut cpu = machine("accumulator_move_with_m40_does_not_overflow");
         cpu.st.ac[0] = 0x01_E500_0030;
         run(&mut cpu);
@@ -374,15 +374,15 @@ mod status_flag {
         assert_eq!(cpu.st.acov, [0, 0, 0, 0]);
     }
 
+    // SPRU374E 4.25 second example: repeat(CSR) SUBC *AR1, AC1 with CSR = 1, two steps
+    // with divisor 0100h << 15 = 80 0000h:
+    //   0746 0000 - 80 0000 = 06C6 0000 -> 0D8C 0001
+    //   0D8C 0001 - 80 0000 = 0D0C 0001 -> 1A18 0003
+    // SPRU374E (and SWPU067E) print 00 1A18 0007: that low word contradicts the 4.25
+    // algorithm and the printed high word (three steps would give 3330 0007), so this
+    // test expects the computed value.
     #[test]
     fn repeated_subc_example() {
-        // SPRU374E 4.25 second example: repeat(CSR) SUBC *AR1, AC1 with CSR = 1, two steps
-        // with divisor 0100h << 15 = 80 0000h:
-        //   0746 0000 - 80 0000 = 06C6 0000 -> 0D8C 0001
-        //   0D8C 0001 - 80 0000 = 0D0C 0001 -> 1A18 0003
-        // SPRU374E (and SWPU067E) print 00 1A18 0007: that low word contradicts the 4.25
-        // algorithm and the printed high word (three steps would give 3330 0007), so this
-        // test expects the computed value.
         let mut cpu = machine("repeated_subc_example");
         write(&mut cpu, 0x200, 0x0100);
         cpu.st.ac[1] = 0x00_0746_0000;
@@ -520,10 +520,10 @@ mod conditional_repeat {
 mod execute_conditionally {
     use super::*;
 
+    // SPRU374E 4.28.2 examples, XCCPART AR0 != #0 then ADD *AR2+, AC0; the example's
+    // 00 0000 EF0C shows EF00h zero extended, so SXMD = 0
     #[test]
     fn manual_examples() {
-        // SPRU374E 4.28.2 examples, XCCPART AR0 != #0 then ADD *AR2+, AC0; the example's
-        // 00 0000 EF0C shows EF00h zero extended, so SXMD = 0
         for (name, ac0) in [("xcc_ar0_3000", 0x00_0000_EF0C), ("xcc_ar0_0", 0x00_0000_000C)] {
             let mut cpu = machine(name);
             write(&mut cpu, 0x405, 0xEF00);
@@ -533,9 +533,9 @@ mod execute_conditionally {
         }
     }
 
+    // previous_instruction || XCCPART cond: the partner runs unconditionally
     #[test]
     fn after_a_partner() {
-        // previous_instruction || XCCPART cond: the partner runs unconditionally
         for (name, ac0) in [("xcc_partner_tc2_0", 0x0C), ("xcc_partner_tc2_1", 0x0D)] {
             let mut cpu = machine(name);
             write(&mut cpu, 0x1600, 1);
