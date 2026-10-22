@@ -74,11 +74,11 @@ single-slot values (4 GiB, 3 GiB, 64 tasks, 200% CPU) and accepts only
 | Scope | Command (from the repository root) |
 | --- | --- |
 | Core guard, outside a job (must refuse) | after `scripts/cargo-test-contained`: the containment binary of `build/rust-target/test-binaries.txt` with `--ignored outside`, run without the launcher |
-| Core guard, inside a job (kernel readback, live revalidation) | `scripts/cargo-test-contained` (rust/c55x_core/tests/containment.rs); trace cap of the binding: `ZEN_CORE_DIR=<dir> bin/c55x-contained -- python3 -m unittest tests.test_c55x_emu_containment` |
+| Core guard, inside a job (kernel readback, live revalidation, trace cap) | `scripts/cargo-test-contained` (rust/c55x_core/tests/containment.rs) |
 | Rust tests (dropped cores free their memory: tests/lifecycle.rs) | `scripts/cargo-test-contained` |
 | Launcher (real kernel, tiny budgets; run outside a job) | `ZEN_CORE_DIR=<dir> python3 -m unittest tests.test_c55x_launcher` |
 | Pure policy logic (fake trees) | `scripts/cargo-test-contained` (the unit tests of rust/c55x_core/src/policy.rs) |
-| Emulator caps | `python3 -m unittest tests.test_c55x_emu_resource_caps` |
+| Emulator caps (memory, loads, code cache; image size in c55x-run) | `scripts/cargo-test-contained` (rust/c55x_core/tests/resource_caps.rs, rust/c55x_run/tests/cli.rs) |
 
 ## Limits
 

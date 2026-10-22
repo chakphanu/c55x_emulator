@@ -465,9 +465,10 @@ then keeps the mutated binary. Touch the file after restoring it.
 ## 9. Status at ea461a1
 
 The Python files left in tests/:
-- test_c55x_emu_containment.py: the trace cap test, until Core::set_trace carries the cap.
-- test_c55x_emu_resource_caps.py: BusCaps, ImageCaps and CodeCacheCap, until the core exposes
-  its load bounds and caps.
+- (gone after the caps commit: test_c55x_emu_containment.py, the trace cap is
+  containment.rs::inside::trace_length_cap_is_an_explicit_error; test_c55x_emu_resource_caps.py,
+  BusCaps / CodeCacheCap are tests/resource_caps.rs, ImageCaps are c55x_run tests/cli.rs
+  image_caps over the c55x-run image loader.)
 - test_c55x_launcher.py: stays Python by the owner exception.
 - test_c55x_run.py: tests the CLI, not covered by this migration's mapping.
 
@@ -487,3 +488,15 @@ test is ported too.
 |---|---|---|---|
 | cli::* (the add routine) | `*AR2 = LO(AC0)` | `*AR2 = AC0` | asm55 parse error; the low-word store is spelled `*AR2 = AC0` |
 | cli::port_access_fails_the_run | a 2-instruction listing at the call entry | the routine read_port (label `port` is reserved in asm55) | real code bytes behind the listing |
+
+## 11. Resource caps and the trace cap (after the core caps commit)
+
+| Python test | Rust test | Change |
+|---|---|---|
+| BusCaps.test_address_space_is_the_architectural_16_mib | resource_caps.rs::bus_caps::address_space_is_the_architectural_16_mib | NativeHost::from_listing refuses memory that is not 16 MiB |
+| BusCaps.test_load_outside_the_address_space_is_refused | resource_caps.rs::bus_caps::load_outside_the_address_space_is_refused | Core::load_bytes (address -1 becomes u32::MAX) |
+| BusCaps.test_many_small_loads_stay_fast_and_keep_no_history | resource_caps.rs::bus_caps::many_small_loads_stay_fast | the "no load_log attribute" half has no Rust counterpart |
+| CodeCacheCap.test_runaway_decode_stops_with_an_explicit_error | resource_caps.rs::code_cache_cap::runaway_decode_stops_with_an_explicit_error | MAX_CACHED_INSNS + 1 listing rows are refused by from_listing |
+| ImageCaps.test_image_info_reports_name_size_sections_and_digest | c55x_run tests/cli.rs::image_caps::image_snapshot_is_reported_and_checked | Machine._image_info is gone; c55x-run reports the snapshot digest, which the segments must rebuild, and checks each segment digest |
+| ImageCaps.test_an_image_larger_than_the_address_space_is_refused_before_allocation | c55x_run tests/cli.rs::image_caps::an_image_larger_than_the_address_space_is_refused_before_allocation | declared segment sizes over MAX_IMAGE_BYTES are refused before any file is read or memory allocated |
+| containment test_trace_length_cap_is_an_explicit_error | containment.rs::inside::trace_length_cap_is_an_explicit_error | Core::set_trace with MAX_TRACE_LEN |

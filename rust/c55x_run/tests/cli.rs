@@ -106,20 +106,33 @@ fn add_regs() -> Value {
     json!({"xar0": "0x1600", "xar1": "0x1601", "xar2": "0x1700"})
 }
 
-/// Run c55x-run over the inputs: (exit status, run.json, output.pcm).
-fn run_cli(steps: Value, words: &[u16]) -> (i32, Value, Vec<u8>) {
+/// A fresh input directory under TMPDIR (the job work dir).
+fn input_dir() -> PathBuf {
     static N: AtomicUsize = AtomicUsize::new(0);
     let d = std::env::temp_dir().join(format!("c55x-run-test-{}-{}", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
     fs::create_dir_all(&d).unwrap();
-    write_inputs(&d, steps, words);
+    d
+}
+
+/// Run c55x-run over the inputs in d, then remove d: (exit status, stderr, run.json if
+/// written, output.pcm).
+fn run_dir(d: &Path) -> (i32, String, Option<Value>, Vec<u8>) {
     let out = d.join("out");
-    let status = Command::new(env!("CARGO_BIN_EXE_c55x-run"))
+    let p = Command::new(env!("CARGO_BIN_EXE_c55x-run"))
         .arg("--script").arg(d.join("test.call.json")).arg("--input").arg(d.join("input.bin")).arg("--out").arg(&out)
-        .output().unwrap().status;
-    let run: Value = serde_json::from_slice(&fs::read(out.join("run.json")).unwrap()).unwrap();
+        .output().unwrap();
+    let run = fs::read(out.join("run.json")).ok().map(|b| serde_json::from_slice(&b).unwrap());
     let pcm = fs::read(out.join("output.pcm")).unwrap_or_default();
-    fs::remove_dir_all(&d).unwrap();
-    (status.code().unwrap_or(-1), run, pcm)
+    fs::remove_dir_all(d).unwrap();
+    (p.status.code().unwrap_or(-1), String::from_utf8_lossy(&p.stderr).into_owned(), run, pcm)
+}
+
+/// Run c55x-run over a call script: (exit status, run.json, output.pcm).
+fn run_cli(steps: Value, words: &[u16]) -> (i32, Value, Vec<u8>) {
+    let d = input_dir();
+    write_inputs(&d, steps, words);
+    let (rc, stderr, run, pcm) = run_dir(&d);
+    (rc, run.unwrap_or_else(|| panic!("no run.json: {}", stderr)), pcm)
 }
 
 fn samples(pcm: &[u8]) -> Vec<i16> {
@@ -181,4 +194,45 @@ fn call_without_return_fails_the_run() {
     assert_eq!((rc, run["status"].as_str(), run["calls"].as_array().unwrap().len()), (1, Some("failed"), 1));
     let status = run["calls"][0]["status"].as_str().unwrap();
     assert!(["idle_without_return", "step_limit"].contains(&status), "{}", status);
+}
+
+/// The image loader of c55x-run (from tests/test_c55x_emu_resource_caps.py ImageCaps,
+/// where Machine summarized and bounded the image): the snapshot digest is reported and
+/// must be rebuilt by the segments, each segment must match its digest, and an image
+/// larger than the 24-bit program address space is refused before memory is allocated.
+mod image_caps {
+    use super::*;
+
+    fn image(d: &Path, change: impl FnOnce(&mut Value)) -> (i32, String, Option<Value>) {
+        write_inputs(d, add_steps(), &[1]);
+        let mut image: Value = serde_json::from_slice(&fs::read(d.join("image.json")).unwrap()).unwrap();
+        change(&mut image);
+        fs::write(d.join("image.json"), image.to_string()).unwrap();
+        let (rc, stderr, run, _) = run_dir(d);
+        (rc, stderr, run)
+    }
+
+    #[test]
+    fn image_snapshot_is_reported_and_checked() {
+        let (_, base, code, _) = fixture();
+        let mut mem = vec![0u8; MEM_BYTES];
+        mem[base as usize..base as usize + code.len()].copy_from_slice(&code);
+        let (rc, _, run) = image(&input_dir(), |_| {});
+        assert_eq!((rc, run.unwrap()["image"]["snapshot_sha256"].as_str().map(String::from)), (0, Some(sha(&mem))));
+        let (rc, stderr, run) = image(&input_dir(), |i| i["segments"][0]["sha256"] = json!(sha(b"other")));
+        assert!(rc == 2 && run.is_none() && stderr.contains("segment hash or size mismatch"), "{}", stderr);
+        let (rc, stderr, _) = image(&input_dir(), |i| i["snapshot_sha256"] = json!(sha(b"other")));
+        assert!(rc == 2 && stderr.contains("segments do not rebuild the snapshot"), "{}", stderr);
+    }
+
+    #[test]
+    fn an_image_larger_than_the_address_space_is_refused_before_allocation() {
+        // the declared sizes are checked first: the segment files do not even exist
+        let half = MEM_BYTES / 2 + 1;
+        let (rc, stderr, run) = image(&input_dir(), |i| i["segments"] = json!([
+            {"file": "a.bin", "byte_address": 0, "bytes": half, "sha256": ""},
+            {"file": "b.bin", "byte_address": half, "bytes": half, "sha256": ""}]));
+        assert!(rc == 2 && run.is_none(), "{} {}", rc, stderr);
+        assert!(stderr.contains("exceeds the program address space"), "{}", stderr);
+    }
 }

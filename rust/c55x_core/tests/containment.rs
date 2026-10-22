@@ -1,4 +1,5 @@
-//! The containment guard of the core (from tests/test_c55x_emu_containment.py, scope A).
+//! The containment guard of the core and the trace length cap (from
+//! tests/test_c55x_emu_containment.py, scope A).
 //! The tests in `inside` run in an emulator job (scripts/cargo-test-contained runs this
 //! binary on one thread: some tests change the job's limits and environment and restore
 //! them). The tests in `outside` check the refusal and run only by hand, outside the
@@ -13,10 +14,10 @@ use std::process::{Child, Command};
 use std::thread::sleep;
 use std::time::Duration;
 
-use c55x_core::core::Core;
+use c55x_core::core::{Core, MAX_TRACE_LEN};
 use c55x_core::guard;
 use c55x_core::icache::PcFilter;
-use common::{entry, message, run, try_run, try_step};
+use common::{message, run, try_run, try_step};
 
 const GIB: u64 = 1 << 30;
 const EMU_UNITS: [&str; 8] = ["c55x-emu.service", "c55x-emu-1.service", "c55x-emu-2.service", "c55x-emu-3.service",
@@ -122,15 +123,15 @@ mod inside {
 
     #[test]
     fn every_execution_entry_of_an_existing_core_is_guarded() {
-        // run / step / call / ret / advance execute guest code or advance guest time; a
-        // host checks the guard before each of them
+        // run / step / call / ret / advance execute guest code or advance guest time; the
+        // core checks the containment at each of them
         let mut cpu = machine("core_constructs_and_runs");
         let entries: [(&str, fn(&mut Core) -> Result<(), String>); 5] = [
-            ("run", |c| { entry()?; c.run(1, &PcFilter::default(), None).map(|_| ()).map_err(message) }),
-            ("step", |c| try_step(c)),
-            ("call", |c| { entry()?; c.call(0x20000, 0).map(|_| ()).map_err(message) }),
-            ("ret", |c| { entry()?; c.ret().map(|_| ()).map_err(message) }),
-            ("advance", |c| { entry()?; c.advance(1).map_err(message) }),
+            ("run", |c| c.run(1, &PcFilter::default(), None).map(|_| ()).map_err(message)),
+            ("step", |c| c.step().map_err(message)),
+            ("call", |c| c.call(0x20000, 0).map(|_| ()).map_err(message)),
+            ("ret", |c| c.ret().map(|_| ()).map_err(message)),
+            ("advance", |c| c.advance(1).map_err(message)),
         ];
         let saved = std::env::var(c55x_core::policy::ENV_JOB).unwrap();
         std::env::remove_var(c55x_core::policy::ENV_JOB);
@@ -138,6 +139,15 @@ mod inside {
         let refused: Vec<(&str, bool)> = entries.iter().map(|(name, f)| (*name, f(&mut cpu).is_err())).collect();
         std::env::set_var(c55x_core::policy::ENV_JOB, saved);
         assert!(refused.iter().all(|(_, r)| *r), "{:?}", refused);
+    }
+
+    #[test]
+    fn trace_length_cap_is_an_explicit_error() {
+        let mut cpu = machine("nop");
+        assert!(cpu.set_trace(MAX_TRACE_LEN + 1).is_err());
+        assert!(cpu.set_trace(MAX_TRACE_LEN).is_ok());  // the maximum itself is fine
+        assert!(cpu.set_trace(0).is_ok());
+        assert_eq!(MAX_TRACE_LEN, 1 << 22);
     }
 
     #[test]

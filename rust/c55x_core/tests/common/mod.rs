@@ -89,27 +89,18 @@ impl Fixture {
     }
 }
 
-/// The containment check of an execution entry, as every host makes it before running
-/// the core (c55x_py enter(), c55x-run).
-pub fn entry() -> Result<(), String> {
-    c55x_core::guard::guard_entry()
-}
-
 /// Core::run until the idle loop: Ok(true) when it is reached within MAX_STEPS.
 pub fn try_run(core: &mut Core) -> Result<bool, String> {
-    entry()?;
     core.run(MAX_STEPS, &PcFilter::default(), None).map_err(message)
 }
 
-/// One instruction (Cpu.step), after the entry check.
+/// One instruction (Cpu.step).
 pub fn try_step(core: &mut Core) -> Result<(), String> {
-    entry()?;
     core.step().map_err(message)
 }
 
 /// Cpu.run(max_steps, until=until): Ok(true) when stuck idle with nothing scheduled.
 pub fn try_run_until(core: &mut Core, max_steps: u64, until: u64) -> Result<bool, String> {
-    entry()?;
     core.run(max_steps, &PcFilter::default(), Some(until)).map_err(message)
 }
 
