@@ -6,7 +6,6 @@ reserved MMR 0x05."""
 
 import unittest
 
-from c55x_emu.ir import _dual
 from c55x_emu.testutil import machine, run
 
 FRCT, SXMD, SATD, M40 = 6, 8, 9, 10
@@ -25,17 +24,6 @@ class MantExpTests(unittest.TestCase):
 
     def test_zero(self):
         self.check(0, 0, 0x8000)
-
-    def test_split_indexed_coefficient(self):
-        self.assertEqual(_dual("AC0 = (AC0 >> #16) + (*AR2 * coef(*(CDP+T0))), "
-                               "AC1 = (AC1 >> #16) + (*AR3 * coef(*(CDP+T0)))"),
-                         ["AC0 = (AC0 >> #16) + (*AR2 * coef(*CDP))",
-                          "AC1 = (AC1 >> #16) + (*AR3 * coef(*(CDP+T0)))"])
-
-    def test_split(self):
-        self.assertEqual(_dual("AC2 = mant(AC0), T0 = exp(AC0)"),
-                         ["AC2 = mant(AC0)", "T0 = mant_exp(AC0)"])
-
 
 class DualMultiplyTests(unittest.TestCase):
     def setup(self, *extra):

@@ -5,7 +5,6 @@ the 64-bit add and subtract at 0x90b4ba / 0x90b4ea."""
 
 import unittest
 
-from c55x_emu.expr import parse
 from c55x_emu.registers import EmulationError
 from c55x_emu.testutil import machine, run
 
@@ -36,9 +35,6 @@ class CircularTests(unittest.TestCase):
 
 
 class ShortOperandTests(unittest.TestCase):
-    def test_parse(self):
-        self.assertEqual(parse("*AR1(short(#3))"), ("mem", "short", "AR1", 3))
-
     def test_dsp_mode_uses_t1(self):            # SPRU375G table 6-2
         cpu, bus = machine("XAR1 = mar(*(#01600h))", "T1 = #2", "bit(ST2, #15) = #0",
                            "AC0 = *AR1(short(#3))", "AC1 = *AR1(short(#1))",

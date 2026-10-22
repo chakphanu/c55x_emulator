@@ -200,7 +200,7 @@ mod dual {
     }
 }
 
-/// test_c55x_frontend.py: the synthetic program of rust/fixtures/frontend_synthetic
+/// (was tests/test_c55x_frontend.py) The synthetic program of rust/fixtures/frontend_synthetic
 /// (asm55 / dis55 -qq -r -g, c55x-fixtures) against the outputs of listing.py and ir.py
 /// frozen in ir.tsv, rejected.tsv and fuzz.tsv.
 mod synthetic {

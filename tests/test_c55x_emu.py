@@ -1,29 +1,13 @@
-"""C55x emulator: operand parsing, LCD model, Hello-LCD end to end (instruction semantics:
-rust/c55x_core/tests/semantics.rs)."""
+"""C55x emulator: LCD model, Hello-LCD end to end (instruction semantics:
+rust/c55x_core/tests/semantics.rs, operand parsing: rust/c55x_core/src/frontend/tests.rs)."""
 
 import unittest
 
 from c55x_emu.paths import EXAMPLES_DIR
 from c55x_emu.bus import Bus
-from c55x_emu.expr import number, parse
 from c55x_emu.lcd import Lcd
 
 HELLO = EXAMPLES_DIR / "hello_lcd" / "hello_lcd.out"
-
-
-class ParseTests(unittest.TestCase):
-    def test_numbers(self):
-        self.assertEqual([number(s) for s in ("#8191", "#-1", "#0x020120", "#01600h")],
-                         [8191, -1, 0x20120, 0x1600])
-
-    def test_memory_operands(self):
-        self.assertEqual(parse("*+AR2(#0001h)"), ("mem", "pre", "AR2", 1))
-        self.assertEqual(parse("*(AR3+T0)"), ("mem", "postreg", "AR3", ("+", "T0")))
-        self.assertEqual(parse("*AR3(#009fh)"), ("mem", "idx", "AR3", 0x9F))
-        self.assertEqual(parse("*AR3+"), ("mem", "post", "AR3", 1))
-
-    def test_multiply_is_not_a_memory_operand(self):
-        self.assertEqual(parse("AC0 * T0"), ("bin", "*", ("reg", "AC0"), ("reg", "T0")))
 
 
 class LcdTests(unittest.TestCase):
