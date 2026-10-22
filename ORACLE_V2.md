@@ -6,7 +6,13 @@ core (SQDST-corrected snapshot; this repository's `8871bc9` is
 byte-identical to its source).
 
 - Build: `bin/c55x-contained --job work -- ./rust/build.sh` -> `build/py/c55x_core.so`
-- SHA256 (reference since the eight-slot containment):
+- SHA256 (current reference):
+  1751dcd27339c47e0468c1136bb5bc88988195a0fb9c86c5749340cf44d1aa00, built from
+  commit a86cc31 (clean `git archive` export; a second build in another
+  directory gives the same hash). Relative to 29b184c5 it adds a86cc31: RPTC
+  reads 0 after a completed RPTCC (see `CHANGELOG.md`). Gates: full test
+  suite, the 1617 routine vectors below with zero differences, cargo test.
+- SHA256 of the previous reference (since the eight-slot containment):
   29b184c5635083ba08b81b41dfcf2cc5fe9c72c1bad560d5926c32e673505ab4, built from
   commit 28aa22b (later commits that do not touch `rust/` do not change it):
   commit c7c1a9f plus the eight-slot containment guard
