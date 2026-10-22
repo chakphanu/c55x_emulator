@@ -1,6 +1,6 @@
 //! The command-line host c55x-run (from tests/test_c55x_run.py): a call script over a
 //! memory image and a listing, run without Python, giving output.pcm and run.json
-//! (c55x-cli-run/1). The routines come from the fixture rust/fixtures/cli. The binary
+//! (c55x-cli-run/1 and /2). The routines come from the fixture rust/fixtures/cli. The binary
 //! refuses to build a core outside an emulator job of bin/c55x-contained, so these tests
 //! run there (scripts/cargo-test-contained); each test starts one process.
 
@@ -114,13 +114,16 @@ fn input_dir() -> PathBuf {
     d
 }
 
-/// Run c55x-run over the inputs in d, then remove d: (exit status, stderr, run.json if
-/// written, output.pcm).
+/// Run c55x-run over the inputs in d (with input.bin unless the script has no records),
+/// then remove d: (exit status, stderr, run.json if written, output.pcm).
 fn run_dir(d: &Path) -> (i32, String, Option<Value>, Vec<u8>) {
     let out = d.join("out");
-    let p = Command::new(env!("CARGO_BIN_EXE_c55x-run"))
-        .arg("--script").arg(d.join("test.call.json")).arg("--input").arg(d.join("input.bin")).arg("--out").arg(&out)
-        .output().unwrap();
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_c55x-run"));
+    cmd.arg("--script").arg(d.join("test.call.json"));
+    if d.join("input.bin").exists() {
+        cmd.arg("--input").arg(d.join("input.bin"));
+    }
+    let p = cmd.arg("--out").arg(&out).output().unwrap();
     let run = fs::read(out.join("run.json")).ok().map(|b| serde_json::from_slice(&b).unwrap());
     let pcm = fs::read(out.join("output.pcm")).unwrap_or_default();
     fs::remove_dir_all(d).unwrap();
@@ -185,6 +188,50 @@ fn code_page_write_fails_the_run() {
     let (rc, run, _) = run_cli(json!([record_write(), call("add", "add", regs)]), &[1]);
     assert_eq!((rc, run["status"].as_str(), run["calls"][0]["status"].as_str()), (1, Some("failed"), Some("execution_error")));
     assert_eq!(run["totals"]["code_page_writes"].as_u64(), Some(1));
+}
+
+#[test]
+fn observed_call_without_records() {
+    // a version-2 script: the setup runs the calls, there are no records and no input
+    let observe = json!({"final_state": true, "memory_diff_since": "start", "trace_pcs": 3});
+    let regs = json!({"xar0": "0x1600", "xar1": "0x1601", "xar2": "0x1700", "cycles": 0});
+    let mut observed = call("add", "add", regs);
+    observed["observe"] = observe;
+    let setup = json!([{"op": "write", "word_address": "0x1600", "words": [1, 5]},
+                       {"op": "mark_memory", "name": "start"}, observed,
+                       {"op": "restore_image"},             // the 1, 5 and the result are gone again
+                       {"op": "mark_memory", "name": "start"}, observed]);
+    let d = input_dir();
+    write_inputs(&d, json!([]), &[]);
+    let mut script: Value = serde_json::from_slice(&fs::read(d.join("test.call.json")).unwrap()).unwrap();
+    script["schema"] = json!("c55x-call-script/2");
+    script["setup"] = setup;
+    script.as_object_mut().unwrap().remove("records");
+    fs::write(d.join("test.call.json"), script.to_string()).unwrap();
+    fs::remove_file(d.join("input.bin")).unwrap();
+    let (rc, stderr, run, pcm) = run_dir(&d);
+    let run = run.unwrap_or_else(|| panic!("no run.json: {}", stderr));
+    assert_eq!((rc, run["format"].as_str(), &run["input"], pcm.len()), (0, Some("c55x-cli-run/2"), &Value::Null, 0));
+    let (first, second) = (&run["calls"][0], &run["calls"][1]);
+    assert_eq!(first["memory_diff"], json!([[0x1700, 0, 6]]));
+    // the last 3 of the 4 pcs of the routine
+    let add = sym("add");
+    let (tsv, _, _, _) = fixture();
+    let pcs: Vec<u32> = tsv.lines().filter(|l| !l.starts_with('#'))
+        .map(|l| u32::from_str_radix(l.split('\t').next().unwrap(), 16).unwrap())
+        .filter(|&pc| pc >= add).take(4).collect();
+    assert_eq!(first["trace_pcs"], json!(pcs[1..]));
+    let state = &first["final_state"];
+    assert_eq!((&state["ac"][0], &state["xar"][2], &state["pc"]), (&json!(6), &json!(0x1700), &json!(SENTINEL)));
+    assert_eq!((&state["cycles"], &state["acov"], &state["loop_active"]),
+               (&first["cycles"], &json!([0, 0, 0, 0]), &json!([null, null])));
+    let mut keys: Vec<&String> = state.as_object().unwrap().keys().collect();
+    let initial = initial_state();
+    let mut expected: Vec<&String> = initial.as_object().unwrap().keys().collect();
+    keys.sort();
+    expected.sort();
+    assert_eq!(keys, expected);
+    assert_eq!((&second["memory_diff"], &second["final_state"]["ac"][0]), (&json!([]), &json!(0)));
 }
 
 #[test]

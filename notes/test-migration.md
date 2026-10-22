@@ -470,7 +470,7 @@ The Python files left in tests/:
   BusCaps / CodeCacheCap are tests/resource_caps.rs, ImageCaps are c55x_run tests/cli.rs
   image_caps over the c55x-run image loader.)
 - test_c55x_launcher.py: stays Python by the owner exception.
-- test_c55x_run.py: tests the CLI, not covered by this migration's mapping.
+- test_c55x_run.py: ported to rust/c55x_run/tests/cli.rs (section 10) and deleted.
 
 The 50 board tests went in 69f2583. The McBSP tests are tests/mcbsp.rs, and
 test_c55x_emu_audio.py is deleted.
@@ -481,8 +481,10 @@ rust/c55x_run/tests/cli.rs spawns the c55x-run binary of the package
 (CARGO_BIN_EXE_c55x-run) once per test, in the emulator job. It covers the 5 tests of
 test_c55x_run.py at 47bf87c, over the fixture cli: the image is a segment holding the
 assembled routines, and the listing is the c55x listing/1 TSV made from prog.lst.
-test_c55x_run.py goes once vector-ops (which adds a Python test there) is merged and that
-test is ported too.
+After vector-ops, its version-2 test test_observed_call_without_records became
+cli::observed_call_without_records (the trace pcs come from the fixture listing: the
+last 3 of the routine's 4). test_c55x_run.py is deleted. The only Python test file left
+is test_c55x_launcher.py (owner exception).
 
 | Test | Python text | Fixture | Why |
 |---|---|---|---|
