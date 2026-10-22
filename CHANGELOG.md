@@ -97,9 +97,31 @@ below. Tests: `tests/test_c55x_emu_manual_review.py` unless noted.
     operands stay zero extended. Evidence: text. Tests:
     `SxmdIndependentOperandTests`.
 
-Additional tests (f020ace): ADD K16 carry, single address evaluation, `- #k` and
-negative saturation; MOV ACx, ACy with SATD and with M40 = 1 together with the
-ACOV1 bit position in ST0_55; repeated SUBC without overflow.
+12. **The Python front end builds the forms the core already compiled**
+    (21502f0): RPTCC (`while ([!]TC1 && (RPTC < #k)) repeat`), dual 16-bit
+    arithmetic with two HI/LO operands (SPRU374E 4.26), BCNT
+    (`Tx = count(ACx, ACy, TCx)`), SQDST, and execute(D_Unit) after a partner
+    or with a pointer-updating store partner (4.28). Previously programs using
+    them stopped with an error. SQDST is lowered so that CARRY reports the
+    borrow of every subtraction (4.77), not the SUB Smem << #16 rule (4.80.11).
+    On a firmware decode corpus of 4,899 executed instructions the IR now equals
+    that of a downstream copy of this front end.
+13. **Dual 16-bit arithmetic reports overflow** (f81dbb9): an overflow of
+    either part (bit 15 low, bit 31 high) sets ACOVy (SPRU374E 4.26.3-4.26.5);
+    values, per-part saturation and CARRY are unchanged. Evidence: text.
+14. **An instruction skipped by XCCPART still runs its address phase**
+    (1e7b548): its pointer modifications happen without the data access
+    (SPRU374E 4.28.2 example 2: AR2 still increments); previously this stopped
+    with an error. Evidence: example.
+15. **The core compiles instructions from a plain Rust IR** (c7c1a9f), converted
+    once from the front end's Python objects; no guest behavior change (1,617
+    vectors and 58,400 fuzz cases identical).
+
+Additional tests (f020ace, ebaf1de): ADD K16 carry, single address evaluation,
+`- #k` and negative saturation; MOV ACx, ACy with SATD and with M40 = 1 together
+with the ACOV1 bit position in ST0_55; repeated SUBC without overflow; BCNT,
+dual 16-bit arithmetic, RPTCC, XCCPART and SQDST from SPRU374E 4.9, 4.26, 4.61,
+4.28 and 4.77.
 
 ### Manual errata found
 
@@ -138,6 +160,8 @@ ACOV1 bit position in ST0_55; repeated SUBC without overflow.
   8000h, Cmem >= 8001h); the core keeps the raw product, the manual text
   ("32-bit result sign extended") would flip its sign. No worked example covers
   it.
+- A10: CSR after an RPTCC loop that ends early: SPRU374E 4.61 gives 3,
+  SWPU067E gives 4 for the same case; the core follows SWPU067E.
 - Silicon erratum CPU_89 (assembler remark R5673), unchanged: an overflowing
   M40 = 0, SXMD = 0 shift-left may not saturate correctly on silicon.
 
@@ -152,18 +176,20 @@ ACOV1 bit position in ST0_55; repeated SUBC without overflow.
   is ignored when C54CM = 0.
 - ADD K16 with a memory-mapped register or I/O operand keeps the generic path
   (no CARRY, ACOV0 or SATD handling).
-- Dual 16-bit arithmetic does not report ACOV.
-- The Python front end (`c55x_emu/ir.py`) does not emit several forms the core
-  accepts: bit count (BCNT), dual 16-bit arithmetic, the conditional repeat
-  (RPTCC) and the execute modes that apply a condition to the next
-  instruction's data or to a partner store. Programs using them stop with an
-  error.
+- The dual 16-bit forms with a Tx or single Smem operand (ADD/SUB dual(Lmem),
+  Tx; ADDSUB / SUBADD) still run as two independent half assignments, without
+  the per-part CARRY and overflow rules of SPRU374E 4.26, and without an error.
+- An execute(D_Unit) condition bundled with an address-phase partner (`mar(...)`)
+  skips the partner when false, contrary to SPRU374E 4.28.2.
+- A read-modify-write of one Smem with a pointer modification other than
+  ADD K16, Smem (for example `*AR1+ = *AR1+ | #k`) evaluates the address twice.
 - Not yet checked: how `dis55` prints a negative K16 in a memory compare
   (`TCx = Smem == #k`); the compare uses the constant as printed. The address
   arithmetic `mar(ARx + Tx)` reads Tx through the SXMD path, which cannot change
   a 16-bit A-unit result but is inconsistent.
-- `dis55` can misprint the target of a relative call or goto bundled with a
-  parallel operation; such an instruction fails with an error.
+- With the extra listing options `-e -b`, `dis55` can misprint the target of a
+  relative call or goto bundled with a parallel operation; the options the
+  emulator uses (`-qq -r -g`) print it correctly.
 
 ### Verification
 
