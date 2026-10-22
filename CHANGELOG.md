@@ -17,12 +17,12 @@ guide. Instruction spellings in the tests were checked by assembling them with
 `asm55` and reading them back with `dis55 -r -g`. Citations give section numbers
 only.
 
-## Unreleased
+## 2026-10-22
 
-A review of the core against the four manuals above. The reference core is still
-the build listed in `ORACLE_V2.md`; the candidate core with these changes is
-listed there too and becomes the reference only when the owner confirms it.
-Tests: `tests/test_c55x_emu_manual_review.py` unless noted.
+A review of the core against the four manuals above. The core built from
+commit 6704168 (SHA256 6891ce79...) is the reference since this release (see
+`ORACLE_V2.md`); the previous reference 24f97bac... has the defects fixed
+below. Tests: `tests/test_c55x_emu_manual_review.py` unless noted.
 
 ### Fixed
 
@@ -87,6 +87,16 @@ Tests: `tests/test_c55x_emu_manual_review.py` unless noted.
     sets ACOVy, without saturation. SPRU374E / SWPU067E 4.25. Evidence: example
     (first SUBC example; see the erratum below for the second one).
 
+11. **Multiplier operands and bytes loaded into TAx ignore SXMD** (6704168).
+    With SXMD = 0 a signed Tx / Smem / Cmem multiplier operand was zero
+    extended (FFFFh x FFFFh gave FFFE 0001h instead of 1), and a byte loaded
+    into T/AR was zero extended. SPRU371F 2.10.2.11 (MAC inputs are sign
+    extended to 17 bits regardless of SXMD), SPRU374E / SWPU067E 4.47 / 4.48
+    operand lists and 4.4.5 / 4.4.6 (a TAx destination is sign extended
+    regardless of SXMD; an accumulator destination follows SXMD). `uns()`
+    operands stay zero extended. Evidence: text. Tests:
+    `SxmdIndependentOperandTests`.
+
 Additional tests (f020ace): ADD K16 carry, single address evaluation, `- #k` and
 negative saturation; MOV ACx, ACy with SATD and with M40 = 1 together with the
 ACOV1 bit position in ST0_55; repeated SUBC without overflow.
@@ -143,10 +153,15 @@ ACOV1 bit position in ST0_55; repeated SUBC without overflow.
 - ADD K16 with a memory-mapped register or I/O operand keeps the generic path
   (no CARRY, ACOV0 or SATD handling).
 - Dual 16-bit arithmetic does not report ACOV.
-- MAC multiplier operands from Tx or Smem follow SXMD although SPRU371F 2.10.2.11
-  and SWPU067E say they are sign extended to 17 bits regardless; with SXMD = 0 a
-  signed FFFFh x FFFFh is therefore computed as FFFE 0001h and then sign extended
-  (entry 4), where the hardware gives +1. To be fixed next.
+- The Python front end (`c55x_emu/ir.py`) does not emit several forms the core
+  accepts: bit count (BCNT), dual 16-bit arithmetic, the conditional repeat
+  (RPTCC) and the execute modes that apply a condition to the next
+  instruction's data or to a partner store. Programs using them stop with an
+  error.
+- Not yet checked: how `dis55` prints a negative K16 in a memory compare
+  (`TCx = Smem == #k`); the compare uses the constant as printed. The address
+  arithmetic `mar(ARx + Tx)` reads Tx through the SXMD path, which cannot change
+  a 16-bit A-unit result but is inconsistent.
 - `dis55` can misprint the target of a relative call or goto bundled with a
   parallel operation; such an instruction fails with an error.
 
@@ -156,15 +171,18 @@ ACOV1 bit position in ST0_55; repeated SUBC without overflow.
   against the reference core; the full suite run one contained job per module
   (only the two known example-artifact errors remain); `cargo test` 17 passed.
 - Routine regression: 1,617 differential vectors over five verified firmware
-  routines show zero differences between the reference core and the candidate.
+  routines show zero differences between the previous reference and the new core.
   These routines do not exercise the changed cases.
 - Differential fuzz of instruction forms (26,400 + 9,600 seeded cases, SATD /
-  M40 / FRCT modes, edge values) between the reference core and the candidate,
-  with a core built at every intermediate commit: every difference is attributed
-  to the commit whose entry above predicts it; no unattributed difference.
+  M40 / FRCT modes, edge values) between the previous reference and the new
+  core, with a core built at every intermediate commit: every difference is
+  attributed to the commit whose entry above predicts it; no unattributed
+  difference. For entry 11, 58,400 cases with SXMD as a mode: no difference
+  with SXMD = 1, and every difference with SXMD = 0 has a negative signed
+  operand.
 - An independent review of the implementation against all four manuals found
-  one defect (entry 4, `uns()` products), fixed in 59bcf0b; a second review of
-  that fix and of the added tests found no defect.
+  one defect (entry 4, `uns()` products), fixed in 59bcf0b; reviews of that
+  fix, of the added tests and of entry 11 found no defect.
 
 ## Earlier changes
 

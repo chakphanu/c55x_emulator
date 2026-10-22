@@ -6,16 +6,20 @@ core (SQDST-corrected snapshot; this repository's `8871bc9` is
 byte-identical to its source).
 
 - Build: `bin/c55x-contained --job work -- ./rust/build.sh` -> `build/py/c55x_core.so`
-- SHA256 (reference, with resource containment): 24f97bac9828549532600301ddd03962d2a714a72b2a1ef2326f3c7543b7ed53
-  (built from commit 1deaa42; a second build in another directory gives the same hash)
+- SHA256 (reference since 2026-10-22, owner-confirmed):
+  6891ce79f76f18485cb890f1f39e304a4c88b37dc02fe851c9077f862662b441, built from
+  commit 6704168 (later documentation-only commits do not change it). It fixes
+  the defects listed under "Defects of the previous reference" below; every
+  change, its evidence and its test are in `CHANGELOG.md`.
+- SHA256 of the previous reference (with resource containment):
+  24f97bac9828549532600301ddd03962d2a714a72b2a1ef2326f3c7543b7ed53 (commit
+  1deaa42). Keep a copy outside `build/py` for comparisons and select it with
+  `ZEN_CORE_DIR=<dir>`.
 - SHA256 of the earlier oracle v2 build without the containment guard:
   afcebfd440af00d594e6b7ada8494d174946fafd16681c26bc2cd620e0ef639c (commit 34fd281)
-- Candidate (NOT the reference until the owner confirms it): SHA256
-  2227d21d36011263aa37664168c3a2805a175b54260636715efc2759366c88c2, built from
-  commit f020ace (later documentation-only commits do not change it). It fixes
-  the defects listed under "Known defects of the reference build" below; see
-  `CHANGELOG.md` for every change, its evidence and its test. Use it without
-  touching the reference: `ZEN_CORE_DIR=<dir> bin/c55x-contained -- ...`.
+- The semantic list below and the regression figures in this header describe
+  the oracle v2 builds (afcebfd4 / 24f97bac) relative to 3dbef971; the current
+  reference changes them as described in `CHANGELOG.md`.
 - The guard and the leak fix change the binary but not the guest behavior: 1617
   differential vectors compared between the two builds show zero differences in
   status, instruction count, cycles, registers, memory windows, outside writes,
@@ -74,12 +78,12 @@ discriminating test.
    no value or cycle change (asserted by test). Citation: none needed
    (trace is an emulator facility). Tests: same file.
 
-## Known defects of the reference build
+## Defects of the previous reference
 
 Found by a review against SPRU374E, SWPU067E, SPRU371F and the C55x v3.x CPU
-guide; fixed in the candidate above (details, evidence and tests in
-`CHANGELOG.md`). Results that depend on these cases should be re-checked when
-the candidate becomes the reference.
+guide in the oracle v2 builds (afcebfd4 / 24f97bac); fixed in the current
+reference (details, evidence and tests in `CHANGELOG.md`). Results obtained
+with the previous reference that depend on these cases should be re-checked.
 
 - Overflow of one part of a parallel bundle is reported on another part's
   accumulator (dual MAC: the second MAC's overflow lands in ACOV0; a store
@@ -96,6 +100,8 @@ the candidate becomes the reference.
 - ACOV0-ACOV3 are missing from the ST0_55 image; ACx -> ACy moves, ADD K16,
   Smem, SAT and SUBC do not report overflow; SATR keeps the 16 LSBs after
   saturating; ADD K16, Smem evaluates a post-modified address twice.
+- With SXMD = 0, multiplier operands and bytes loaded into a T/AR register
+  are zero extended instead of sign extended.
 
 ## Known ambiguities (documented for hardware validation)
 

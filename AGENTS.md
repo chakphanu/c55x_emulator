@@ -30,8 +30,10 @@ exit-code table: `CONTAINMENT.md`.
 point `ZEN_CORE_DIR` at a core of unknown origin. Moving any pin to a new core
 build needs explicit confirmation from the repository owner.
 
-`build/afce/` holds the previous reference core, kept only as a regression
-baseline. It has no containment guard: never use it for new work.
+Earlier reference builds (their SHA256 values are in `ORACLE_V2.md`) may be kept
+in other `build/` directories for regression comparison only. `build/afce/` has
+no containment guard: never use it for new work. The behavior differences
+between builds are listed in `CHANGELOG.md`.
 
 ## Tests
 
