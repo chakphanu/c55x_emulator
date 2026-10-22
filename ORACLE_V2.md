@@ -10,6 +10,12 @@ byte-identical to its source).
   (built from commit 1deaa42; a second build in another directory gives the same hash)
 - SHA256 of the earlier oracle v2 build without the containment guard:
   afcebfd440af00d594e6b7ada8494d174946fafd16681c26bc2cd620e0ef639c (commit 34fd281)
+- Candidate (NOT the reference until the owner confirms it): SHA256
+  2227d21d36011263aa37664168c3a2805a175b54260636715efc2759366c88c2, built from
+  commit f020ace (later documentation-only commits do not change it). It fixes
+  the defects listed under "Known defects of the reference build" below; see
+  `CHANGELOG.md` for every change, its evidence and its test. Use it without
+  touching the reference: `ZEN_CORE_DIR=<dir> bin/c55x-contained -- ...`.
 - The guard and the leak fix change the binary but not the guest behavior: 1617
   differential vectors compared between the two builds show zero differences in
   status, instruction count, cycles, registers, memory windows, outside writes,
@@ -68,11 +74,34 @@ discriminating test.
    no value or cycle change (asserted by test). Citation: none needed
    (trace is an emulator facility). Tests: same file.
 
-## Known ambiguities (unchanged, documented for hardware validation)
+## Known defects of the reference build
 
-- The destination guard-bit rule for signed LEFT shifts of negative
-  inputs is ambiguous in both CPU manuals; implemented as guard-clear
-  (fits every documented example).
+Found by a review against SPRU374E, SWPU067E, SPRU371F and the C55x v3.x CPU
+guide; fixed in the candidate above (details, evidence and tests in
+`CHANGELOG.md`). Results that depend on these cases should be re-checked when
+the candidate becomes the reference.
+
+- Overflow of one part of a parallel bundle is reported on another part's
+  accumulator (dual MAC: the second MAC's overflow lands in ACOV0; a store
+  partner sets or erases its neighbour's flag).
+- Item 3 above is wrong for in-range results: with M40 = 0 a signed shift with
+  a count >= 0 (shift by zero included) drops the sign of a negative result,
+  reports a false overflow and, with SATD = 1, saturates it to 00 7FFF FFFF.
+  "Guard clear" applies only to overflowing results without SATD.
+- Accumulator stores with a shift (`HI/LO(ACx << k)`, `HI(saturate(...))`)
+  depend on M40 and SATD and raise the overflow flag; the manuals shift the
+  40-bit accumulator per SXMD only.
+- The generic signed multiply does not sign extend its 32-bit product (the
+  accumulator-operand forms do).
+- ACOV0-ACOV3 are missing from the ST0_55 image; ACx -> ACy moves, ADD K16,
+  Smem, SAT and SUBC do not report overflow; SATR keeps the 16 LSBs after
+  saturating; ADD K16, Smem evaluates a post-modified address twice.
+
+## Known ambiguities (documented for hardware validation)
+
+- The destination bits of an overflowing M40 = 0 signed shift without
+  SATD (low 32 bits with clear guard bits on left shifts); the open
+  questions of the review are listed in `CHANGELOG.md`.
 - Silicon erratum Advisory CPU_89: with M40=0, SXMD=0, C54CM=0 an
   overflowing accumulator shift-left may not saturate appropriately on
   real silicon; the emulator saturates per the manual text.

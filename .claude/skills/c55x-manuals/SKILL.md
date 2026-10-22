@@ -48,8 +48,10 @@ get encodings from `asm55` / `dis55`, not from the manual.
 
 ## Open questions that need hardware, not more reading
 
-- The destination guard-bit rule for a signed left shift of a negative input (the
-  wording in both CPU guides is ambiguous; the emulator clears the guard bits).
+- The destination bits of an OVERFLOWING M40 = 0 signed shift without SATD (the
+  emulator keeps the low 32 bits with clear guard bits on left shifts). In-range
+  results keep their sign (SPRU371F / v3.x 2.10.2.11). `CHANGELOG.md` lists the
+  other open questions and two manual errata.
 - Silicon erratum CPU_89 (assembler remark R5673): with M40 = 0, SXMD = 0 and
   C54CM = 0 an overflowing accumulator shift-left may not saturate correctly on
   real silicon; the emulator saturates as the manuals describe.

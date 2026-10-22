@@ -23,7 +23,9 @@ Run everything from the repository root; all data paths hang off it (`ZEN_ROOT` 
     python3 -m unittest discover -s tests -t .
 
 Runs that load the core must go through `bin/c55x-contained` (see
-`CONTAINMENT.md`; agents: `AGENTS.md`).
+`CONTAINMENT.md`; agents: `AGENTS.md`). Behavior changes of the core, with the
+manual each one follows: `CHANGELOG.md`; the reference core build:
+`ORACLE_V2.md`.
 
 ## Run the examples
 
