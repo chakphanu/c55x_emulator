@@ -402,7 +402,7 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         for k, unit in enumerate(EMU_UNITS):
             self.assertIn("emulator slot %d: free %s" % (k, unit), r.stdout)
-        self.assertNotIn("emulator slot 8", r.stdout)
+        self.assertNotIn("emulator slot 10", r.stdout)
         self.assertIn("MemoryMax=19327352832", r.stdout)
         self.assertIn("TasksMax=448", r.stdout)
 
