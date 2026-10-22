@@ -1,0 +1,86 @@
+
+	.sect ".text"
+020000: 104910           AC1 = mant(AC0), T1 = exp(AC0)
+020003: 4a7e             goto #0x020003
+020005: ec318e001600     XAR0 = mar(*(#01600h))
+02000b: ec319e001610     XAR1 = mar(*(#01610h))
+020011: ec317e001620     XCDP = mar(*(#01620h))
+020017: 82049104         AC0 = *AR0+ * coef(*CDP+), AC1 = *AR1+ * coef(*CDP+)
+02001b: 4a7e             goto #0x02001b
+02001d: 4663             bit(ST1, #6) = #1
+02001f: ec318e001600     XAR0 = mar(*(#01600h))
+020025: ec319e001610     XAR1 = mar(*(#01610h))
+02002b: ec317e001620     XCDP = mar(*(#01620h))
+020031: 82049104         AC0 = *AR0+ * coef(*CDP+), AC1 = *AR1+ * coef(*CDP+)
+020035: 4a7e             goto #0x020035
+020037: 4010             AC0 = AC0 + #1
+020039: 4a7e             goto #0x020039
+02003b: 4693             bit(ST1, #9) = #1
+02003d: 4010             AC0 = AC0 + #1
+02003f: 4a7e             goto #0x02003f
+020041: 4693             bit(ST1, #9) = #1
+020043: 46a3             bit(ST1, #10) = #1
+020045: 4010             AC0 = AC0 + #1
+020047: 4a7e             goto #0x020047
+020049: 544d             AC1 = saturate(rnd(AC0))
+02004b: 54eb             AC3 = rnd(AC2)
+02004d: 4a7e             goto #0x02004d
+02004f: 46c1             bit(ST0, #12) = #1
+020051: 3c04             T0 = #0
+020053: 3c55_9f65        T1 = #5 || if (TC2) execute(AD_Unit)
+020057: 3c74             T0 = #7
+020059: 4a7e             goto #0x020059
+02005b: 46c0             bit(ST0, #12) = #0
+02005d: 3c04             T0 = #0
+02005f: 3c55_9f65        T1 = #5 || if (TC2) execute(AD_Unit)
+020063: 3c74             T0 = #7
+020065: 4a7e             goto #0x020065
+020067: 46d1             bit(ST0, #13) = #1
+020069: ec319e001600     XAR1 = mar(*(#01600h))
+02006f: 3c00             AC0 = #0
+020071: 3c01             AC1 = #0
+020073: 96e4             if (TC1) execute(D_Unit)
+020075: 3c50             AC0 = #5
+020077: 4a7e             goto #0x020077
+020079: 46d0             bit(ST0, #13) = #0
+02007b: ec319e001600     XAR1 = mar(*(#01600h))
+020081: 3c00             AC0 = #0
+020083: 3c01             AC1 = #0
+020085: 96e4             if (TC1) execute(D_Unit)
+020087: 3c50             AC0 = #5
+020089: 4a7e             goto #0x020089
+02008b: 46d0             bit(ST0, #13) = #0
+02008d: ec319e001600     XAR1 = mar(*(#01600h))
+020093: 3c00             AC0 = #0
+020095: 3c01             AC1 = #0
+020097: 96e4             if (TC1) execute(D_Unit)
+020099: b423             mar(*AR1+)
+02009b: d62111           AC1 = AC1 + *AR1
+02009e: 4a7e             goto #0x02009e
+0200a0: ec31ae010003     XAR2 = mar(*(#010003h))
+0200a6: 4625             bit(ST2, #2) = #1
+0200a8: 1402a4           mar(AR2 + #2)
+0200ab: 4a7e             goto #0x0200ab
+0200ad: 4682             bit(ST1, #8) = #0
+0200af: ec31ce001600     XAR4 = mar(*(#01600h))
+0200b5: 3e44             T0 = #-4
+0200b7: dd8d000002       AC0 = AC0 + (*AR4(#0002h) << T0)
+0200bc: 4a7e             goto #0x0200bc
+0200be: ec31ae001600     XAR2 = mar(*(#01600h))
+0200c4: e94130           *AR2 = LO(AC0 << #-16)
+0200c7: 4a7e             goto #0x0200c7
+0200c9: 5035             pshboth(AC3)
+0200cb: 5025             pshboth(AC2)
+0200cd: 3e13             AC3 = #-1
+0200cf: 3e12             AC2 = #-1
+0200d1: 5024             AC2 = popboth()
+0200d3: 5034             AC3 = popboth()
+0200d5: 4a7e             goto #0x0200d5
+0200d7: e651100c04       *port(#00c04h) = #16
+0200dc: ec31be000c04     XAR3 = mar(*(#00c04h))
+0200e2: f5610001_9a      *AR3 = *AR3 | #1 || writeport()
+0200e7: 4a7e             goto #0x0200e7
+0200e9: ec31be000004     XAR3 = mar(*(#00004h))
+0200ef: ed6108           AC0 = dbl(*AR3)
+0200f2: 4a7e             goto #0x0200f2
+0200f4: 20               nop
