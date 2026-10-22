@@ -1,13 +1,20 @@
-//! A host without Python: memory from an image, the decoded instructions of a listing,
-//! no peripherals. The pages holding decoded instructions are code pages; a data write
-//! into one, a hooked word or an I/O port access is an error (counted), since nothing
-//! is decoded at run time and no peripheral is modeled.
+//! A host without Python: memory from an image, the instructions of a listing decoded by
+//! the Rust frontend, no peripherals. The pages holding decoded instructions are code
+//! pages; a data write into one, a hooked word or an I/O port access is an error
+//! (counted), since nothing is decoded at run time and no peripheral is modeled.
+//!
+//! For tools and tests: `NativeHost::from_listing(memory, rows, symbols)` gives a Core
+//! (containment-checked); then set registers in `core.st`, enter a routine with
+//! `core.st.pc = core.call(entry, return_address)?` and run it with `core.run(steps,
+//! &PcFilter::new(stop), None)` or `core.step()`; read memory with `core.read(word)`.
 
 use std::any::Any;
 use std::collections::HashMap;
 
 use crate::core::{Core, MEM_BYTES};
-use crate::err::{emu, R};
+use crate::err::{emu, Error, R};
+use crate::frontend::{self, Insn};
+use crate::guard;
 use crate::host::{Ctx, Decoded, Host};
 
 pub struct NativeHost {
@@ -19,8 +26,37 @@ pub struct NativeHost {
 }
 
 impl NativeHost {
-    /// A core over memory (MEM_BYTES bytes) and the decoded instructions (pc -> instruction).
-    pub fn core(mem: Vec<u8>, decoded: HashMap<u32, Decoded>) -> R<Core> {
+    /// A core over memory (MEM_BYTES bytes) and the listed instructions, decoded by the
+    /// frontend (branch targets: '#<address>' or symbols). Every row's block_end must
+    /// agree with the opcode bytes in memory. Only inside the managed containment.
+    pub fn from_listing(mem: Vec<u8>, rows: &[Insn], symbols: &HashMap<String, i64>) -> R<Core> {
+        guard::guard().map_err(|e| Error::Emu(format!("refused outside the managed containment: {}", e)))?;
+        if mem.len() != MEM_BYTES {
+            return emu(format!("memory of {} bytes, not {}", mem.len(), MEM_BYTES));
+        }
+        let resolve = frontend::resolver(symbols);
+        let mut decoded = HashMap::new();
+        for r in rows {
+            let at = r.addr as usize;
+            if at + r.size as usize > MEM_BYTES {
+                return emu(format!("0x{:06x}: instruction outside memory", r.addr));
+            }
+            let end = frontend::listing::block_end(r.addr, &mem[at..at + r.size as usize], &r.text)?;
+            if end != r.block_end {
+                return emu(format!("0x{:06x}: block_end of the listing disagrees with the memory bytes", r.addr));
+            }
+            let ir = match frontend::build(r, &resolve) {
+                Ok(ast) => Ok(ast),
+                Err(Error::Unsupported(why)) | Err(Error::Emu(why)) => Err(why),
+                Err(e) => return Err(e),
+            };
+            decoded.insert(r.addr, Decoded { size: r.size, text: r.text.clone(), ir });
+        }
+        NativeHost::core(mem, decoded)
+    }
+
+    /// A core over memory and already decoded instructions (pc -> instruction).
+    pub(crate) fn core(mem: Vec<u8>, decoded: HashMap<u32, Decoded>) -> R<Core> {
         if mem.len() != MEM_BYTES {
             return emu(format!("memory of {} bytes, not {}", mem.len(), MEM_BYTES));
         }
@@ -128,5 +164,17 @@ mod tests {
         assert!(core.fetch(0x20002).is_err());
         let host: &NativeHost = core.host.as_any().downcast_ref().unwrap();
         assert_eq!((host.code_page_writes, host.unmodeled_ports), (1, 1));
+    }
+
+    #[test]
+    fn from_listing_is_containment_checked() {
+        if guard::guard().is_ok() {
+            return;                             // inside an emulator job: nothing to refuse
+        }
+        let rows = [Insn { addr: 0x20000, size: 2, text: "AC0 = #5".into(), block_end: None }];
+        match NativeHost::from_listing(vec![0; MEM_BYTES], &rows, &HashMap::new()) {
+            Err(Error::Emu(m)) => assert!(m.contains("containment")),
+            _ => panic!("built a core outside the containment"),
+        }
     }
 }

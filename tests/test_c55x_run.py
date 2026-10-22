@@ -1,6 +1,6 @@
 """The native command-line host rust/c55x_run (c55x-run): a call script over a
-memory image, a listing and an IR file, run without Python in the core, giving
-output.pcm and run.json (c55x-cli-run/1). Synthetic programs only.
+memory image and a listing (decoded by the core's Rust frontend), run without
+Python, giving output.pcm and run.json (c55x-cli-run/1). Synthetic programs only.
 
 Needs the binary in C55X_RUN (cargo build --release --manifest-path
 rust/Cargo.toml -p c55x_run); skipped otherwise. Runs under bin/c55x-contained
@@ -16,9 +16,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from c55x_emu import ir
-from c55x_emu.listing import Insn
-
 BINARY = os.environ.get("C55X_RUN")
 BASE = 0x20000                      # program byte address, two bytes per instruction
 SENTINEL = 0xFFFF00
@@ -29,15 +26,6 @@ PLAIN = ["trn0", "trn1", "bk03", "bk47", "bkc", "bsa01", "bsa23", "bsa45", "bsa6
 
 def sha(data):
     return hashlib.sha256(data).hexdigest()
-
-
-def enc(x):
-    """c55x-ir/1: tuple -> JSON array, list -> {"L": [...]}."""
-    if isinstance(x, tuple):
-        return [enc(v) for v in x]
-    if isinstance(x, list):
-        return {"L": [enc(v) for v in x]}
-    return x
 
 
 def initial_state():
@@ -52,22 +40,15 @@ def initial_state():
 
 
 def write_inputs(d, program, steps, words):
-    """Image (zero memory), listing and IR of program at BASE, call script, input."""
+    """Image (zero memory), listing of program at BASE, call script, input."""
     mem = bytes(MEM_BYTES)
     (d / "memory.bin").write_bytes(mem)
     (d / "image.json").write_text(json.dumps({
         "format": "c55x-memory-image/1", "size_bytes": MEM_BYTES, "snapshot": "memory.bin",
         "snapshot_sha256": sha(mem), "segments": []}))
-    insns = [Insn(BASE + 2 * i, 2, text) for i, text in enumerate(program)]
-    lines = ["# c55x listing/1 (synthetic)"] + ["%06x\t2\t-\t%s" % (i.addr, i.text) for i in insns]
-    listing = ("\n".join(lines) + "\n").encode()
-    (d / "code.listing.tsv").write_bytes(listing)
-
-    def resolve(target):
-        return int(target[1:], 0)
-    irs = [{"pc": i.addr, "ir": enc(ir.build(i, resolve))} for i in insns]
-    (d / "code.ir.json").write_text(json.dumps({"format": "c55x-ir/1", "listing_sha256": sha(listing),
-                                               "insns": irs}))
+    lines = ["# c55x listing/1 (synthetic)"] + ["%06x\t2\t-\t%s" % (BASE + 2 * i, text)
+                                             for i, text in enumerate(program)]
+    (d / "code.listing.tsv").write_text("\n".join(lines) + "\n")
     (d / "test.call.json").write_text(json.dumps({
         "schema": "c55x-call-script/1", "image": "image.json", "listing": "code.listing.tsv",
         "return_sentinel": "0x%x" % SENTINEL,
@@ -96,7 +77,7 @@ class NativeRunTests(unittest.TestCase):
         write_inputs(d, program, steps, words)
         out = d / "out"
         p = subprocess.run([BINARY, "--script", str(d / "test.call.json"), "--input", str(d / "input.bin"),
-                            "--out", str(out), "--ir", str(d / "code.ir.json")], capture_output=True, text=True)
+                            "--out", str(out)], capture_output=True, text=True)
         run = json.loads((out / "run.json").read_text())
         return p.returncode, run, (out / "output.pcm").read_bytes()
 

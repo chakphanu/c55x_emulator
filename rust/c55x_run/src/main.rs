@@ -1,13 +1,14 @@
 //! c55x-run: run a C55x call script (c55x-call-script/1) over a memory image
 //! (c55x-memory-image/1) and a precomputed listing without Python, and write the run
-//! (c55x-cli-run/1: output.pcm and run.json). Each call is run like the reference
+//! (c55x-cli-run/1: output.pcm and run.json). The listing is decoded by the core's
+//! frontend; its block_end column is checked against the image bytes. Each call is run
+//! like the reference
 //! runner's bounded native batches: enter like a call instruction returning to the
 //! sentinel, run chunks of steps until the pc reaches it, check limits between chunks.
 //! The core is built only inside the managed containment (bin/c55x-contained).
 //!
-//! Usage: c55x-run --script S.json --input FILE --out DIR --ir IR.json
+//! Usage: c55x-run --script S.json --input FILE --out DIR
 
-mod decode;
 mod state;
 
 use std::collections::HashMap;
@@ -17,16 +18,15 @@ use std::time::Instant;
 use c55x_core::core::{Core, MEM_BYTES};
 use c55x_core::err::Error;
 use c55x_core::guard;
-use c55x_core::host::Decoded;
+use c55x_core::frontend::Insn;
 use c55x_core::icache::{PcFilter, PcSet};
 use c55x_core::native::NativeHost;
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 
-use decode::{InsnDecoder, IrFile, Listed};
 use state::num;
 
-const USAGE: &str = "usage: c55x-run --script S.json --input FILE --out DIR --ir IR.json";
+const USAGE: &str = "usage: c55x-run --script S.json --input FILE --out DIR";
 
 fn sha(data: &[u8]) -> String {
     Sha256::digest(data).iter().map(|b| format!("{:02x}", b)).collect()
@@ -48,23 +48,22 @@ fn int_of(v: &Value, key: &str) -> Result<i128, String> {
     num(field(v, key)?).map_err(|e| format!("{}: {}", key, e))
 }
 
-struct Args { script: PathBuf, input: PathBuf, out: PathBuf, ir: Option<PathBuf> }
+struct Args { script: PathBuf, input: PathBuf, out: PathBuf }
 
 fn args() -> Result<Args, String> {
     let mut a = std::env::args().skip(1);
-    let (mut script, mut input, mut out, mut ir) = (None, None, None, None);
+    let (mut script, mut input, mut out) = (None, None, None);
     while let Some(k) = a.next() {
         let v = a.next().ok_or_else(|| format!("{} needs a value", k))?;
         match k.as_str() {
             "--script" => script = Some(PathBuf::from(v)),
             "--input" => input = Some(PathBuf::from(v)),
             "--out" => out = Some(PathBuf::from(v)),
-            "--ir" => ir = Some(PathBuf::from(v)),
             _ => return Err(format!("unknown option {}", k)),
         }
     }
     match (script, input, out) {
-        (Some(script), Some(input), Some(out)) => Ok(Args { script, input, out, ir }),
+        (Some(script), Some(input), Some(out)) => Ok(Args { script, input, out }),
         _ => Err("--script, --input and --out are required".into()),
     }
 }
@@ -97,7 +96,7 @@ fn load_image(path: &Path) -> Result<(Vec<u8>, String), String> {
 }
 
 /// The listing: "pc(hex) TAB size TAB block_end(hex or -) TAB text", '#' comments.
-fn load_listing(bytes: &[u8]) -> Result<Vec<Listed>, String> {
+fn load_listing(bytes: &[u8]) -> Result<Vec<Insn>, String> {
     let text = std::str::from_utf8(bytes).map_err(|_| "listing is not UTF-8".to_string())?;
     let mut out = Vec::new();
     for line in text.lines() {
@@ -108,8 +107,8 @@ fn load_listing(bytes: &[u8]) -> Result<Vec<Listed>, String> {
             _ => return Err(format!("listing line {:?}", line)),
         };
         let bad = || format!("listing line {:?}", line);
-        out.push(Listed {
-            pc: u32::from_str_radix(pc, 16).map_err(|_| bad())?,
+        out.push(Insn {
+            addr: u32::from_str_radix(pc, 16).map_err(|_| bad())?,
             size: size.parse().map_err(|_| bad())?,
             block_end: if end == "-" { None } else { Some(u32::from_str_radix(end, 16).map_err(|_| bad())?) },
             text: text.to_string(),
@@ -292,18 +291,7 @@ fn run(a: &Args) -> Result<bool, String> {
     let listing_bytes = read(&listing_path)?;
     let listing_sha = sha(&listing_bytes);
     let listing = load_listing(&listing_bytes)?;
-    let mut decoder: Box<dyn InsnDecoder> = match &a.ir {
-        Some(p) => {
-            let bytes = read(p)?;
-            Box::new(IrFile::load(&abs(p), &bytes, sha(&bytes), &listing_sha)?)
-        }
-        None => return Err("no decoder: give --ir (the text frontend is not built in yet)".into()),
-    };
-    let mut decoded = HashMap::new();
-    for l in &listing {
-        decoded.insert(l.pc, Decoded { size: l.size, text: l.text.clone(), ir: decoder.ir(l) });
-    }
-    let mut core = NativeHost::core(mem, decoded).map_err(|e| core_error(e).1)?;
+    let mut core = NativeHost::from_listing(mem, &listing, &HashMap::new()).map_err(|e| core_error(e).1)?;
     let init = field(&script, "initial_state")?.as_object().ok_or("initial_state")?;
     state::initial(&mut core.st, init)?;
     let sentinel = int_of(&script, "return_sentinel")? as u32;
@@ -350,7 +338,6 @@ fn run(a: &Args) -> Result<bool, String> {
         "error": error.as_ref().map(|(t, m)| json!({"type": t, "message": m})),
         "producer": {"name": "c55x-run", "sha256": exe_sha, "version": env!("CARGO_PKG_VERSION")},
         "core": core_info,
-        "decoder": decoder.describe(),
         "script": {"path": abs(&a.script), "sha256": sha(&script_bytes)},
         "image": {"snapshot_sha256": snapshot},
         "listing": {"sha256": listing_sha},
