@@ -117,8 +117,8 @@ discriminating test.
    any constant whose 32-bit view is >= 0x8000 is interpreted as its
    signed 16-bit value. Citations: SPRU374E 4.47/4.48 operand rules
    ("the 16-bit signed constant, K16, sign extended to 17 bits").
-   Tests: tests/test_c55x_emu_oracle_v2.py (includes the real-code form
-   `AC0 = AC0 * #0xffffa99a`). A firmware-wide audit (audit/
+   Tests: rust/c55x_core/tests/oracle_v2.rs (the real-code constant,
+   printed `#0xffffa99a` by dis55 -e and `#-22118` by the runtime listing). A firmware-wide audit (audit/
    mul_const_audit.py) decoded every multiply-by-constant site from its
    raw opcode bytes and confirmed the text rule matches the opcode
    decode at all 35 sites across four forms (MACK K16, MPYK K16, MPYK

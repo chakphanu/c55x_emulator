@@ -434,3 +434,7 @@ tool spelling. The expected values are unchanged:
 | acov::shift_m40::*, acov_mac::* | `AC0 = #0x10000`, `AC0 = #0x7FFFFFFF`, `AC0 = #-0x7FFFFFFF` | the test presets AC0 | asm55 E0003: constant out of range (no 32-bit load) |
 | acov::step_and_run_agree_on_immediate_shifts, acov_mac::step_and_run_agree_on_mac | `ACy = ACx >> #4` | `ACy = ACx << #-4` | asm55 E0003: `>> #k` needs the same register on both sides |
 | acov_mac::m40_off_negative_overflow_saturates | `AC0 = AC0 - (T1 * #0x7FFF)` | `AC0 = AC0 - (T1 * *AR3)`, *AR3 = 0x7FFF | asm55: no MAS with a constant |
+| long_words::{memory_load_both_parities_and_postincrement, mmr_load_both_parities} | `AC2 = uns(dbl(...))` | `bit(ST1, #8) = #0`, then `AC2 = dbl(...)` | asm55 has no uns(dbl()) load; SXMD = 0 gives the same zero-extended long load |
+| oracle_v2::k16_constant::*, k8_constant::* | `#0xffffa99a`, `#0xffffe200`, `#0xffffff80`, `#0xffffffad`, `#0x8000` (dis55 -e prints) | `#-22118`, `#-7680`, `#-128`, `#-83`, `#-32768` | the runtime listing prints negative constants as such; same encodings |
+| oracle_v2::k8_constant::mpyk_k8_negative | `AC1 = #0x10000` | the test presets AC1 | asm55 E0003: constant out of range |
+| lifecycle::* (test_c55x_emu_gc) | weakref / gc.collect | build, touch all 16 MiB, drop; RSS must not grow (freed memory reused) | Rust frees on drop; the allocator may keep freed memory for reuse, so return to the OS is not required |

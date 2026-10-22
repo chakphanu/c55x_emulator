@@ -1,0 +1,4 @@
+# c55x-fixtures image: section, byte address, size; bytes in hex
+.text 0x020000 41
+4682ed43284a7eeb63284a7e4682ed1028984a7e4682ed1228984a7eeb102898
+4a7eeb1228984a7e20

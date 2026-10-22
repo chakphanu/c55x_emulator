@@ -1,0 +1,18 @@
+
+	.sect ".text"
+020000: 4682             bit(ST1, #8) = #0
+020002: ed4328           AC2 = dbl(*AR2+)
+020005: 4a7e             goto #0x020005
+020007: eb6328           dbl(*AR3+) = AC2
+02000a: 4a7e             goto #0x02000a
+02000c: 4682             bit(ST1, #8) = #0
+02000e: ed1028_98        AC2 = dbl(@AC0_L) || mmap()
+020012: 4a7e             goto #0x020012
+020014: 4682             bit(ST1, #8) = #0
+020016: ed1228_98        AC2 = dbl(@AC0_H) || mmap()
+02001a: 4a7e             goto #0x02001a
+02001c: eb1028_98        dbl(@AC0_L) = AC2 || mmap()
+020020: 4a7e             goto #0x020020
+020022: eb1228_98        dbl(@AC0_H) = AC2 || mmap()
+020026: 4a7e             goto #0x020026
+020028: 20               nop

@@ -42,14 +42,14 @@ def policy_error():
 @unittest.skipIf(IN_JOB, "run directly to test the refusal")
 class RejectedOutside(unittest.TestCase):
     def test_direct_construction_is_refused(self):
-        from tests.test_c55x_emu_long_words import machine
+        from c55x_emu.testutil import machine
         with self.assertRaises(policy_error()) as cm:
             machine("nop")
         self.assertIn("resource policy", str(cm.exception))
         self.assertIn("bin/c55x-contained", str(cm.exception))
 
     def test_fake_environment_marker_alone_is_refused(self):
-        code = ("from tests.test_c55x_emu_long_words import machine\n"
+        code = ("from c55x_emu.testutil import machine\n"
                 "try:\n    machine('nop')\nexcept Exception as e:\n"
                 "    print(type(e).__name__, e); raise SystemExit(3)\n"
                 "print('ADMITTED')\n")
@@ -64,7 +64,7 @@ class RejectedOutside(unittest.TestCase):
 @unittest.skipUnless(IN_JOB, "run through bin/c55x-contained")
 class InsideJob(unittest.TestCase):
     def test_core_constructs_and_runs(self):
-        from tests.test_c55x_emu_long_words import machine, run
+        from c55x_emu.testutil import machine, run
         cpu, _ = machine("AC0 = #0x100", "AC0 = AC0 << #16")
         run(cpu)
         self.assertEqual(cpu.ac[0], 0x100 << 16)
@@ -89,7 +89,7 @@ class InsideJob(unittest.TestCase):
         # A Core built under valid policy must stop executing once the group
         # is relaxed. The job cgroup is a bounded test group: the shared
         # ancestor keeps its 18 GiB cap throughout, and the value is restored.
-        from tests.test_c55x_emu_long_words import machine
+        from c55x_emu.testutil import machine
         cpu, _ = machine("AC0 = #1", "AC0 = AC0 << #1")
         cpu.step()                                   # valid policy: executes
         job = job_cgroup()
@@ -107,7 +107,7 @@ class InsideJob(unittest.TestCase):
         cpu.step()                                   # restored: executes again
 
     def test_policy_is_revalidated_when_the_marker_disappears(self):
-        from tests.test_c55x_emu_long_words import machine
+        from c55x_emu.testutil import machine
         cpu, _ = machine("AC0 = #1", "AC0 = AC0 << #1")
         cpu.step()
         saved = os.environ.pop("C55X_CONTAINED_JOB")
@@ -123,7 +123,7 @@ class InsideJob(unittest.TestCase):
         # run/step/call/ret/advance are the native entries that execute guest
         # code or advance guest time; all reach the guard through enter().
         # (ata_io validates its register address first, then enters.)
-        from tests.test_c55x_emu_long_words import machine
+        from c55x_emu.testutil import machine
         cpu, _ = machine("AC0 = #1")
         core = cpu.core
         entries = {"run": lambda: core.run(1, set()), "step": core.step,
@@ -171,7 +171,7 @@ class InsideJob(unittest.TestCase):
             path.unlink()
 
     def test_trace_length_cap_is_an_explicit_error(self):
-        from tests.test_c55x_emu_long_words import machine
+        from c55x_emu.testutil import machine
         cpu, _ = machine("nop")
         with self.assertRaises(ValueError):
             cpu.core.set_trace((1 << 22) + 1)

@@ -1,0 +1,12 @@
+.text 0x020000
+.text 0x020000
+.text 0x020000
+___text__ 0x020000
+t_register_count 0x020000
+e_register_count 0x020002
+t_right_by_one_clears_the_guards 0x020004
+e_right_by_one_clears_the_guards 0x020006
+t_register_destination_shifts_16_bits 0x020008
+e_register_destination_shifts_16_bits 0x02000a
+___etext__ 0x02000d
+etext 0x02000d
