@@ -1,6 +1,7 @@
-//! Static guards for the single source of truth (AGENTS.md): the core stays free of
-//! Python and only the core's native host implements its host interface. These tests
-//! only read files; they build no core and need no TI tools.
+//! Static guards for the single source of truth (AGENTS.md): the workspace has no
+//! Python binding, the repository no Python besides the launcher and its tests, and only
+//! the core's native host implements its host interface. These tests only read files;
+//! they build no core and need no TI tools.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -118,4 +119,64 @@ fn only_rust_hosts_implement_host() {
         }
     }
     assert!(hits.is_empty(), "Host implemented outside the allowed hosts:\n{}", hits.join("\n"));
+}
+
+fn repo_dir() -> PathBuf {
+    rust_dir().parent().expect("repository directory").to_path_buf()
+}
+
+#[test]
+fn workspace_has_no_pyo3() {
+    let root = rust_dir();
+    let lock = read(&root.join("Cargo.lock"));
+    assert!(!lock.contains("pyo3"), "pyo3 in rust/Cargo.lock");
+    for entry in fs::read_dir(&root).expect("rust directory") {
+        let manifest = entry.expect("directory entry").path().join("Cargo.toml");
+        if manifest.is_file() {
+            assert!(!read(&manifest).contains("pyo3"), "pyo3 in {}", manifest.display());
+        }
+    }
+}
+
+#[test]
+fn no_python_binding_or_package() {
+    for dir in ["rust/c55x_py", "c55x_emu"] {
+        assert!(!repo_dir().join(dir).exists(), "{} exists", dir);
+    }
+}
+
+/// Every file of the repository outside build output, caches and .git.
+fn repo_files(dir: &Path, out: &mut Vec<PathBuf>) {
+    for entry in fs::read_dir(dir).unwrap_or_else(|e| panic!("{}: {}", dir.display(), e)) {
+        let p = entry.expect("directory entry").path();
+        let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        if p.is_dir() {
+            if !matches!(name.as_str(), ".git" | "build" | "target" | "__pycache__") {
+                repo_files(&p, out);
+            }
+        } else {
+            out.push(p);
+        }
+    }
+}
+
+#[test]
+fn no_python_besides_the_launcher() {
+    // The launcher and its tests are the explicit Python exception (AGENTS.md).
+    let allowed = ["bin/c55x-contained", "tests/test_c55x_launcher.py", "tests/__init__.py"];
+    let root = repo_dir();
+    let mut files = Vec::new();
+    repo_files(&root, &mut files);
+    let mut hits = Vec::new();
+    for path in files {
+        let rel = path.strip_prefix(&root).unwrap_or(&path).to_string_lossy().replace('\\', "/");
+        let head = fs::read(&path).map(|b| b.into_iter().take(128).collect::<Vec<u8>>()).unwrap_or_default();
+        let first = String::from_utf8_lossy(&head);
+        let first = first.lines().next().unwrap_or("");
+        let python = rel.ends_with(".py") || (first.starts_with("#!") && first.contains("python"));
+        if python && !allowed.contains(&rel.as_str()) {
+            hits.push(rel);
+        }
+    }
+    assert!(hits.is_empty(), "Python files outside the launcher exception:\n{}", hits.join("\n"));
 }
