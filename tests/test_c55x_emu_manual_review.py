@@ -116,18 +116,15 @@ class StoreShiftTests(unittest.TestCase):
         run(cpu)
         return cpu, bus.read(0x1600)
 
-    @unittest.expectedFailure       # not fixed yet (F14)
     def test_right_shift_brings_guard_bits_down(self):
         _, word = self.store("*AR0 = HI(AC0 << #-8)", 0, 0x01_0000_0000)
         self.assertEqual(word, 0x0100)
 
-    @unittest.expectedFailure       # not fixed yet (F14)
     def test_store_shift_does_not_saturate_with_satd(self):
         cpu, word = self.store("*AR0 = HI(AC0 << #2)", 0, 0x00_4000_0000, bit(SATD))
         self.assertEqual(word, 0x0000)                 # bits 31-16 of 01 0000 0000
         self.assertEqual(cpu.core.acov(), [0, 0, 0, 0])
 
-    @unittest.expectedFailure       # not fixed yet (F14)
     def test_saturate_keyword_clamps_the_shifted_value(self):
         cases = ((0x00_8000_0000, 0x7FFF),            # 40-bit 01 0000 0000 -> 7FFF FFFF
                  (0xFF_BFFF_FFFF, 0x8000),            # -0x80000002 -> FF 8000 0000

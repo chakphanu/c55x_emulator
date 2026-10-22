@@ -176,7 +176,9 @@ pub fn shift(v: i128, n: i128) -> R<i128> {
     Ok(if n >= 0 { v << n } else { v >> -n })
 }
 
-/// MOV accumulator-to-memory uses the full shifter input independently of M40.
+/// MOV accumulator-to-memory (SPRU374E 4.6.6-4.6.13: affected by SXMD and RDM,
+/// affects none): the shifter input is the 40-bit accumulator, sign-extended from
+/// bit 39 per SXMD, independently of M40 and SATD, and no overflow is reported.
 /// Keep the untruncated result until optional rounding and explicit saturation.
 fn store_value(m: &mut Core, e: &Expr) -> R<i128> {
     match e {
@@ -185,16 +187,17 @@ fn store_value(m: &mut Core, e: &Expr) -> R<i128> {
             Ok(if sx(m) { sext(value, 40) } else { value & ACM })
         }
         Expr::Rnd(x) => { let value = store_value(m, x)?; Ok(rnd(m, value)) }
+        // SPRU374E 4.6.12 / 4.6.13: the 40-bit shifted (and rounded) value is clamped
+        // to 00 7FFF FFFFh / FF 8000 0000h
         Expr::Saturate(x) => Ok(store_value(m, x)?.clamp(-(1i128 << 31), (1i128 << 31) - 1)),
         Expr::Bin { op: op @ (Op::Shl | Op::Shr), a, b, .. } if meta(a).2 => {
             let count = arith(m, b, false, false, false)?;
+            // SPRU374E 4.6.6 / 4.6.7: a Tx count outside -32..+31 saturates to the bound
             let count = if matches!(b.as_ref(), Expr::Reg(Reg::T(_), _)) {
-                // SPRU374E 4.70.3: a Tx count outside -32..+31 saturates and reports overflow
-                m.ovf_pending |= count < -32 || count > 31;
                 count.clamp(-32, 31)
             } else { count } * if *op == Op::Shl { 1 } else { -1 };
-            let value = get(m, a)?;
-            shift_acc(m, value, count)
+            let value = store_value(m, a)?;
+            shift(value, count)
         }
         _ => get(m, e),
     }
