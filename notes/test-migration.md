@@ -473,3 +473,17 @@ The Python files left in tests/:
 
 The 50 board tests went in 69f2583. The McBSP tests are tests/mcbsp.rs, and
 test_c55x_emu_audio.py is deleted.
+
+## 10. c55x_run tests (test_c55x_run.py)
+
+rust/c55x_run/tests/cli.rs spawns the c55x-run binary of the package
+(CARGO_BIN_EXE_c55x-run) once per test, in the emulator job. It covers the 5 tests of
+test_c55x_run.py at 47bf87c, over the fixture cli: the image is a segment holding the
+assembled routines, and the listing is the c55x listing/1 TSV made from prog.lst.
+test_c55x_run.py goes once vector-ops (which adds a Python test there) is merged and that
+test is ported too.
+
+| Test | Python text | Fixture | Why |
+|---|---|---|---|
+| cli::* (the add routine) | `*AR2 = LO(AC0)` | `*AR2 = AC0` | asm55 parse error; the low-word store is spelled `*AR2 = AC0` |
+| cli::port_access_fails_the_run | a 2-instruction listing at the call entry | the routine read_port (label `port` is reserved in asm55) | real code bytes behind the listing |
