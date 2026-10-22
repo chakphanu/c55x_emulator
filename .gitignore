@@ -6,3 +6,4 @@ firmware-work/
 input/
 output/
 .venv/
+target/
