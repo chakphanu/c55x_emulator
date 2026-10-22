@@ -1,8 +1,10 @@
 """Containment tests, scope C: the pure native policy logic.
 
 rust/c55x_core/src/policy.rs has no dependency on pyo3, so its own unit tests
-(fake cgroup trees under a temporary directory: wrong group, relaxed
-ancestor, missing controller file, relaxed rlimits, wrong job class, ...) are
+(fake cgroup trees under a temporary directory: each emulator slot unit,
+names outside the slot set, wrong group, relaxed ancestor, shared caps at and
+one above their limit, missing controller file, relaxed rlimits, wrong job
+class, ...) are
 compiled and run standalone. No kernel state is touched.
 """
 
@@ -28,7 +30,7 @@ class NativePolicyTests(unittest.TestCase):
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
             self.assertRegex(r.stdout, r"test result: ok\. (\d+) passed; 0 failed")
             passed = int(__import__("re").search(r"(\d+) passed", r.stdout).group(1))
-            self.assertGreaterEqual(passed, 17)
+            self.assertGreaterEqual(passed, 22)
 
 
 if __name__ == "__main__":

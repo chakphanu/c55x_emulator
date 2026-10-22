@@ -4,7 +4,10 @@
 //! process runs inside the managed cgroup v2 hierarchy created by
 //! `bin/c55x-contained`:
 //!
-//!   <cgroup2 mount>/.../c55x.slice/c55x-emu.service[/nested...]
+//!   <cgroup2 mount>/.../c55x.slice/<slot unit>[/nested...]
+//!
+//! where <slot unit> is one of the emulator slot units: c55x-emu.service
+//! (slot 0) or c55x-emu-<k>.service for k = 1..7, spelled exactly.
 //!
 //! Kernel state is the proof; the environment marker is only a hint that
 //! produces a clear error for plain direct calls. This module has no
@@ -24,16 +27,17 @@ use std::path::{Component, Path, PathBuf};
 pub const ENV_JOB: &str = "C55X_CONTAINED_JOB";
 pub const SLICE_NAME: &str = "c55x.slice";
 pub const JOB_UNIT: &str = "c55x-emu.service";
+pub const JOB_SLOTS: u32 = 8;
 const LAUNCHER_HINT: &str = "use bin/c55x-contained -- CMD...";
 
 const GIB: u64 = 1 << 30;
 const JOB_MEM_MAX: u64 = 2 * GIB;
 const JOB_PIDS_MAX: u64 = 32;
 const JOB_CPU_RATIO_MAX: f64 = 1.0;
-const SLICE_MEM_MAX: u64 = 4 * GIB;
-const SLICE_MEM_HIGH: u64 = 3 * GIB;
-const SLICE_PIDS_MAX: u64 = 64;
-const SLICE_CPU_RATIO_MAX: f64 = 2.0;
+const SLICE_MEM_MAX: u64 = 10 * GIB;
+const SLICE_MEM_HIGH: u64 = 9 * GIB;
+const SLICE_PIDS_MAX: u64 = 320;
+const SLICE_CPU_RATIO_MAX: f64 = 10.0;
 const RLIMIT_CPU_MAX: u64 = 600;
 const RLIMIT_NOFILE_MAX: u64 = 512;
 const RLIMIT_AS_MAX: u64 = 16 * GIB;
@@ -44,6 +48,18 @@ pub struct Source<'a> {
     pub mountinfo: &'a str,
     pub proc_limits: &'a str,
     pub job_env: Option<&'a str>,
+}
+
+/// True for exactly the emulator slot unit names: JOB_UNIT (slot 0) and
+/// c55x-emu-<k>.service for k = 1..JOB_SLOTS-1 (no sign, no leading zero).
+pub fn is_job_unit(name: &str) -> bool {
+    if name == JOB_UNIT {
+        return true;
+    }
+    match name.strip_prefix("c55x-emu-").and_then(|s| s.strip_suffix(".service")) {
+        Some(k) => (1..JOB_SLOTS).any(|i| k == i.to_string()),
+        None => false,
+    }
 }
 
 fn refuse<T>(why: String) -> Result<T, String> {
@@ -175,19 +191,21 @@ fn resolve_job_dir(proc_cgroup: &str, mountinfo: &str) -> Result<PathBuf, String
             _ => return refuse(format!("cgroup path {:?} is not a plain descending path", rel)),
         }
     }
-    // the job directory is the c55x-emu.service component (nested cgroups
+    // the job directory is the first slot unit component (nested cgroups
     // below it are allowed and only tighten limits)
     let mut dir = PathBuf::from(&mnt_point);
     let mut found_job = false;
     for c in under.components() {
         dir.push(c.as_os_str());
-        if c.as_os_str() == JOB_UNIT {
+        if c.as_os_str().to_str().map_or(false, is_job_unit) {
             found_job = true;
             break;
         }
     }
     if !found_job {
-        return refuse(format!("cgroup {} is not inside {}", rel, JOB_UNIT));
+        return refuse(format!(
+            "cgroup {} is not inside an emulator slot unit ({} or c55x-emu-<1..{}>.service)",
+            rel, JOB_UNIT, JOB_SLOTS - 1));
     }
     Ok(dir)
 }
@@ -311,11 +329,11 @@ Max address space         2147483648           2147483648           bytes     \n
             let slice = self.dir(&format!("/user.slice/{}", SLICE_NAME));
             let job = self.dir(&self.job_rel);
             fs::create_dir_all(&job).unwrap();
-            put(&slice, "memory.max", &(4 * GIB).to_string());
-            put(&slice, "memory.high", &(3 * GIB).to_string());
+            put(&slice, "memory.max", &(10 * GIB).to_string());
+            put(&slice, "memory.high", &(9 * GIB).to_string());
             put(&slice, "memory.swap.max", "0");
-            put(&slice, "pids.max", "64");
-            put(&slice, "cpu.max", "200000 100000");
+            put(&slice, "pids.max", "320");
+            put(&slice, "cpu.max", "1000000 100000");
             put(&job, "memory.max", &GIB.to_string());
             put(&job, "memory.swap.max", "0");
             put(&job, "pids.max", "32");
@@ -371,6 +389,69 @@ Max address space         2147483648           2147483648           bytes     \n
         f.write_good();
         f.expect_refused("not inside");
     }
+    #[test] fn every_slot_unit_is_admitted() {
+        let names = ["c55x-emu.service", "c55x-emu-1.service", "c55x-emu-2.service",
+                     "c55x-emu-3.service", "c55x-emu-4.service", "c55x-emu-5.service",
+                     "c55x-emu-6.service", "c55x-emu-7.service"];
+        assert_eq!(names.len() as u32, JOB_SLOTS);
+        for name in names {
+            assert!(is_job_unit(name), "{}", name);
+            let mut f = Fake::new();
+            f.job_rel = format!("/user.slice/{}/{}", SLICE_NAME, name);
+            f.write_good();
+            assert_eq!(f.check(), Ok(()), "{}", name);
+            // a nested group below the slot unit is admitted too
+            f.job_rel = format!("/user.slice/{}/{}/child", SLICE_NAME, name);
+            f.write_good();
+            assert_eq!(f.check(), Ok(()), "{}/child", name);
+        }
+    }
+    #[test] fn names_outside_the_slot_set_are_refused() {
+        for name in ["c55x-emu-8.service", "c55x-emu-9.service", "c55x-emu-0.service",
+                     "c55x-emu-x.service", "c55x-emu-01.service", "c55x-emu-10.service",
+                     "c55x-emu-+1.service", "c55x-emu-.service", "c55x-emu-1.scope",
+                     "c55x-emu-1.service.d", "c55x-emu1.service", "c55x-emus.service",
+                     "C55X-EMU-1.service", "c55x-work-1-abcdef12.service", "c55x-other.service"] {
+            assert!(!is_job_unit(name), "{}", name);
+            let mut f = Fake::new();
+            f.job_rel = format!("/user.slice/{}/{}", SLICE_NAME, name);
+            f.write_good();
+            f.expect_refused("not inside an emulator slot unit");
+        }
+    }
+    #[test] fn slot_unit_outside_the_shared_slice_is_refused() {
+        let mut f = Fake::new();
+        f.job_rel = "/user.slice/c55xfake.slice/c55x-emu-3.service".to_string();
+        f.write_good();
+        f.expect_refused("not directly below");
+    }
+    #[test] fn shared_caps_are_inclusive_and_one_above_is_refused() {
+        let f = Fake::new();
+        // write_good puts every shared value exactly at its cap
+        assert_eq!(f.check(), Ok(()));
+        put(&f.slice(), "memory.max", &(10 * GIB + 1).to_string());
+        f.expect_refused("shared memory.max");
+        put(&f.slice(), "memory.max", &(10 * GIB).to_string());
+        put(&f.slice(), "memory.high", &(9 * GIB + 1).to_string());
+        f.expect_refused("shared memory.high");
+        put(&f.slice(), "memory.high", &(9 * GIB).to_string());
+        put(&f.slice(), "pids.max", "321");
+        f.expect_refused("shared pids.max");
+        put(&f.slice(), "pids.max", "320");
+        put(&f.slice(), "cpu.max", "1000001 100000");
+        f.expect_refused("shared cpu.max");
+        put(&f.slice(), "cpu.max", "1000000 100000");
+        assert_eq!(f.check(), Ok(()));
+    }
+    #[test] fn smaller_shared_values_are_admitted() {
+        // tighter than the caps (the earlier single-slot values) is fine
+        let f = Fake::new();
+        put(&f.slice(), "memory.max", &(4 * GIB).to_string());
+        put(&f.slice(), "memory.high", &(3 * GIB).to_string());
+        put(&f.slice(), "pids.max", "64");
+        put(&f.slice(), "cpu.max", "200000 100000");
+        assert_eq!(f.check(), Ok(()));
+    }
     #[test] fn relaxed_job_memory_is_refused() {
         let f = Fake::new();
         put(&f.job(), "memory.max", &(3 * GIB).to_string()); f.expect_refused("outside");
@@ -379,13 +460,14 @@ Max address space         2147483648           2147483648           bytes     \n
     #[test] fn relaxed_shared_ancestor_is_refused() {
         let f = Fake::new();
         put(&f.slice(), "memory.max", "max"); f.expect_refused("unlimited");
-        put(&f.slice(), "memory.max", &(8 * GIB).to_string()); f.expect_refused("outside");
-        put(&f.slice(), "memory.max", &(4 * GIB).to_string());
+        put(&f.slice(), "memory.max", &(16 * GIB).to_string()); f.expect_refused("outside");
+        put(&f.slice(), "memory.max", &(10 * GIB).to_string());
         put(&f.slice(), "memory.high", "max"); f.expect_refused("unlimited");
-        put(&f.slice(), "memory.high", &(3 * GIB).to_string());
+        put(&f.slice(), "memory.high", &(9 * GIB).to_string());
         put(&f.slice(), "pids.max", "max"); f.expect_refused("unlimited");
-        put(&f.slice(), "pids.max", "64");
-        put(&f.slice(), "cpu.max", "400000 100000"); f.expect_refused("exceeds");
+        put(&f.slice(), "pids.max", "320");
+        put(&f.slice(), "cpu.max", "2000000 100000"); f.expect_refused("exceeds");
+        put(&f.slice(), "cpu.max", "max 100000"); f.expect_refused("unlimited");
     }
     #[test] fn swap_must_be_zero_at_job_and_slice() {
         let f = Fake::new();
@@ -397,7 +479,7 @@ Max address space         2147483648           2147483648           bytes     \n
     }
     #[test] fn shared_memory_high_must_be_finite_and_bounded() {
         let f = Fake::new();
-        put(&f.slice(), "memory.high", &(4 * GIB).to_string());
+        put(&f.slice(), "memory.high", &(10 * GIB).to_string());
         f.expect_refused("shared memory.high");
         put(&f.slice(), "memory.high", "0");
         f.expect_refused("shared memory.high");
