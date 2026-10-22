@@ -23,9 +23,21 @@ pub struct NativeHost {
     code_pages: Vec<bool>,                  // byte page (pc >> 8) holds a decoded instruction
     pub unmodeled_ports: u64,
     pub code_page_writes: u64,
+    audio_clock: Option<(f64, f64)>,        // (sample rate in Hz, CPU MHz) for the McBSP model
 }
 
 impl NativeHost {
+    /// The native host of a core built by from_listing.
+    pub fn of(core: &mut Core) -> Option<&mut NativeHost> {
+        core.host.as_any_mut().downcast_mut()
+    }
+
+    /// The audio clock the McBSP model reads (Host::audio_clock): sample rate in Hz (0 = no
+    /// clock) and CPU MHz. Without one, an audio McBSP transmit is an error.
+    pub fn set_audio_clock(&mut self, rate_hz: f64, cpu_mhz: f64) {
+        self.audio_clock = Some((rate_hz, cpu_mhz));
+    }
+
     /// A core over memory (MEM_BYTES bytes) and the listed instructions, decoded by the
     /// frontend (branch targets: '#<address>' or symbols). Every row's block_end must
     /// agree with the opcode bytes in memory. Only inside the managed containment.
@@ -65,7 +77,7 @@ impl NativeHost {
             code_pages[(pc as usize & (MEM_BYTES - 1)) >> 8] = true;
         }
         let mut host = Box::new(NativeHost { mem, decoded, code_pages: code_pages.clone(),
-                                             unmodeled_ports: 0, code_page_writes: 0 });
+                                             unmodeled_ports: 0, code_page_writes: 0, audio_clock: None });
         let mem = host.mem.as_mut_ptr();
         Ok(Core::new(host, mem, code_pages))
     }
@@ -106,7 +118,7 @@ impl Host for NativeHost {
     }
 
     fn audio_clock(&mut self, _ctx: &mut Ctx) -> R<Option<(f64, f64)>> {
-        Ok(None)
+        Ok(self.audio_clock)
     }
 
     fn disk_read(&mut self, _ctx: &mut Ctx, _lba: u64) -> R<Vec<u8>> {
@@ -164,6 +176,14 @@ mod tests {
         assert!(core.fetch(0x20002).is_err());
         let host: &NativeHost = core.host.as_any().downcast_ref().unwrap();
         assert_eq!((host.code_page_writes, host.unmodeled_ports), (1, 1));
+    }
+
+    #[test]
+    fn audio_clock_is_plain_data() {
+        let mut core = NativeHost::core(vec![0; MEM_BYTES], HashMap::new()).ok().unwrap();
+        assert!(core.audio_clock().is_err());           // no clock model set
+        NativeHost::of(&mut core).unwrap().set_audio_clock(48000.0, 200.0);
+        assert_eq!(core.audio_clock().ok(), Some((48000.0, 200.0)));
     }
 
     #[test]
