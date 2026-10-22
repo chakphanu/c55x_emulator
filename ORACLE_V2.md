@@ -6,8 +6,19 @@ oracle. The reference build it replaces is the `3dbef971e814e1e7...`
 core (SQDST-corrected snapshot; this repository's `8871bc9` is
 byte-identical to its source).
 
-- Build: `bin/c55x-contained --job work -- ./rust/build.sh` -> `build/py/c55x_core.so`
+- Build: `RUSTC_WRAPPER= CARGO_BUILD_JOBS=1 bin/c55x-contained --job work
+  --env RUSTC_WRAPPER --env CARGO_BUILD_JOBS -- ./rust/build.sh` ->
+  `build/py/c55x_core.so` (with two cargo jobs the linker can hit the job's
+  32-task limit: `posix_spawnp: Resource temporarily unavailable`)
 - SHA256 (current reference):
+  3ab06717ed86678cb05dcb33a8a3b5662378e180403f87d1115c7c837d77de09, built from
+  commit 65a3b09 (clean `git archive` export, same hash as a separate build).
+  It is the first build of the three-crate workspace: dca49fe puts every
+  Python call behind the `Host` trait and 65a3b09 splits `c55x_core`
+  (no dependencies) from the extension `c55x_py`. No guest behavior change
+  relative to 1751dcd2: per-test results of the full suite identical, the
+  1617 routine vectors and 58,400 fuzz cases with zero differences.
+- SHA256 of the previous reference:
   1751dcd27339c47e0468c1136bb5bc88988195a0fb9c86c5749340cf44d1aa00, built from
   commit a86cc31 (clean `git archive` export; a second build in another
   directory gives the same hash). Relative to 29b184c5 it adds a86cc31: RPTC
