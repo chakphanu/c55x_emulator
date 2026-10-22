@@ -40,7 +40,9 @@ fn dropped_cores_are_collected() {
     assert!(five >= base + 5 * 16 - 16, "the cores did not touch their memory");
     drop(cores);
     let again: Vec<Core> = (0..5).map(|_| build()).collect();
-    assert!(rss_mib() < five + 16, "5 dropped cores were not freed ({} MiB more)", rss_mib() - five);
+    // a leak would add 5 x 16 MiB; allow two cores of allocator slack (fragmentation)
+    let more = rss_mib().saturating_sub(five);
+    assert!(more < 2 * 16 + 1, "5 dropped cores were not freed ({} MiB more)", more);
     drop(again);
 }
 

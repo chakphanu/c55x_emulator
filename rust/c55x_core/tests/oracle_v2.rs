@@ -7,10 +7,8 @@
 
 mod common;
 
-use std::collections::VecDeque;
-
 use c55x_core::core::Core;
-use common::{read, run, write};
+use common::{message, read, run, write};
 
 fn machine(name: &str) -> Core {
     fixture!("oracle_v2").core(&format!("t_{}", name))
@@ -60,7 +58,7 @@ mod repeat_body_trace {
         cpu.st.t[0] = value;
         cpu.st.xar[0] = 0x2000;                         // fill destination off the MMR page
         if trace {
-            cpu.trace = Some((1024, VecDeque::new()));
+            cpu.set_trace(1024).unwrap_or_else(|e| panic!("{}", message(e)));
         }
         run(&mut cpu);
         cpu
@@ -80,7 +78,7 @@ mod repeat_body_trace {
     fn tracing_changes_no_value() {
         let once = |trace: bool| {
             let mut cpu = fill(0x1234, trace);
-            cpu.trace = None;
+            cpu.set_trace(0).unwrap_or_else(|e| panic!("{}", message(e)));
             let mem: Vec<u32> = (0..4).map(|i| read(&mut cpu, 0x20000 + i)).collect();
             (cpu.st.ac, cpu.st.t, cpu.st.xar, mem, cpu.st.cycles)
         };
