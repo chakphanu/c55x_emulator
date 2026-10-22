@@ -1,7 +1,7 @@
 //! Shared helpers of the integration tests: a synthetic program of rust/fixtures runs on a
-//! core over NativeHost, decoded by c55x_core::frontend from the fixture listing. The core
-//! is built only after the containment guard passes, so these tests run in an emulator
-//! job of bin/c55x-contained (scripts/cargo-test-contained), never outside it.
+//! core over NativeHost::from_listing (the frontend decodes the fixture listing). That
+//! constructor checks the containment guard, so these tests run in an emulator job of
+//! bin/c55x-contained (scripts/cargo-test-contained), never outside it.
 
 #![allow(dead_code)] // each test binary uses a part of the helpers
 
@@ -12,7 +12,6 @@ use std::path::PathBuf;
 use c55x_core::core::{Core, MEM_BYTES};
 use c55x_core::err::Error;
 use c55x_core::frontend::{self, listing::Insn};
-use c55x_core::host::Decoded;
 use c55x_core::icache::PcFilter;
 use c55x_core::native::NativeHost;
 
@@ -69,22 +68,16 @@ impl Fixture {
         *self.symbols.get(label).unwrap_or_else(|| panic!("{}: no symbol {}", self.name, label)) as u32
     }
 
-    /// A core over the fixture (memory and decoded instructions) with the reset state,
-    /// pc at the label entry. Panics outside the containment.
+    /// A core over the fixture (memory and its listing, NativeHost::from_listing) with the
+    /// reset state, pc at the label entry. Panics outside the containment.
     pub fn core(&self, entry: &str) -> Core {
-        if let Err(e) = c55x_core::guard::guard() {
-            panic!("containment: {}", e);
-        }
         let mut mem = vec![0u8; MEM_BYTES];
         for (addr, data) in &self.sections {
             mem[*addr as usize..*addr as usize + data.len()].copy_from_slice(data);
         }
-        let resolve = frontend::resolver(&self.symbols);
-        let decoded: HashMap<u32, Decoded> = self.insns.iter().map(|(&pc, insn)| {
-            let ir = frontend::build(insn, &resolve).map_err(message);
-            (pc, Decoded { size: insn.size, text: insn.text.clone(), ir })
-        }).collect();
-        let mut core = NativeHost::core(mem, decoded).unwrap_or_else(|e| panic!("{}", message(e)));
+        let rows: Vec<Insn> = self.insns.values().cloned().collect();
+        let mut core = NativeHost::from_listing(mem, &rows, &self.symbols)
+            .unwrap_or_else(|e| panic!("{}: {}", self.name, message(e)));
         core.st.st1 = ST1_INIT;
         core.st.st2 = ST2_INIT;
         core.st.ivpd = 0xFFFF;
