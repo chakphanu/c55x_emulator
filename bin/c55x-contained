@@ -50,7 +50,8 @@ JOB_CPU_QUOTA = (100000, 100000)
 JOB_FDS = 512
 JOB_STOP_SEC = 5
 AS_EMULATOR = 8 * GIB            # RLIMIT_AS (virtual); physical use stays bounded by the cgroup
-AS_WORK = 16 * GIB
+AS_WORK = 64 * 1024 * GIB        # 64 TiB: sanitizer shadow reservations (virtual only, no RAM)
+AS_BY_JOB = {"emulator": AS_EMULATOR, "work": AS_WORK}
 
 RC_INCOMPLETE, RC_HEADROOM, RC_BUSY, RC_POLICY = 70, 74, 75, 77
 RC_INNER_POLICY, RC_OOM, RC_TIMEOUT = 78, 79, 124
@@ -307,8 +308,14 @@ def inner_verify(args):
             pass
         sys.exit(RC_INNER_POLICY)
 
-    if os.environ.get("C55X_CONTAINED_JOB") == "emulator" and args.unit not in EMU_UNITS:
+    job_class = os.environ.get("C55X_CONTAINED_JOB")
+    if job_class not in AS_BY_JOB:
+        fail("job class %r is not emulator or work" % job_class)
+    if job_class == "emulator" and args.unit not in EMU_UNITS:
         fail("unit %s is not an emulator slot unit" % args.unit)
+    if args.as_bytes != AS_BY_JOB[job_class]:
+        fail("address-space limit %d is not the %s value %d" % (
+            args.as_bytes, job_class, AS_BY_JOB[job_class]))
     d = cgroup2_dir()
     if d is None:
         fail("cannot resolve the cgroup2 membership")
@@ -446,7 +453,7 @@ def run_job(args):
     stale = LOCK_DIR / (unit + ".verify-failed")
     if stale.exists():
         stale.unlink()
-    as_bytes = AS_EMULATOR if args.job == "emulator" else AS_WORK
+    as_bytes = AS_BY_JOB[args.job]
     props = ["MemoryMax=%d" % mem, "MemorySwapMax=0", "TasksMax=%d" % JOB_TASKS,
              "CPUQuota=%d%%" % (JOB_CPU_QUOTA[0] // 1000), "OOMPolicy=kill",
              "RuntimeMaxSec=%d" % args.wall_sec, "TimeoutStopSec=%d" % JOB_STOP_SEC,

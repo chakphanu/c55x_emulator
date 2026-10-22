@@ -65,8 +65,10 @@ decision.
   until it stops by itself at its wall-time limit; nothing is killed to make
   room. Only this class can construct a `Core`.
 - `work`: for compilers and sanitizers; several can run at once. Virtual
-  address space is 16 GiB (ASan shadow mappings); the physical ceiling is the
-  same bounded `--mem`.
+  address space is 64 TiB, because ASan and other sanitizers reserve tens of
+  TiB of shadow mappings at startup. That is a virtual allowance only and
+  grants no RAM: the job is still stopped at its `--mem` ceiling (exit 79).
+  Emulator jobs keep 8 GiB.
 
 All jobs share `c55x.slice`: 18 GiB memory (17 GiB high), no swap, 448 tasks,
 1000 percent CPU. One job: no swap, at most 32 tasks, 100 percent CPU, 512 open

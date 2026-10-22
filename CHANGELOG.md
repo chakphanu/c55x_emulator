@@ -196,6 +196,11 @@ Guest behavior is unchanged: only the launcher and the containment guard
 - The shared group `c55x.slice` is raised to memory.max 18 GiB, memory.high
   17 GiB, 448 tasks and 1000% CPU (swap stays 0). Per-job limits and admission
   are unchanged.
+- Work jobs get 64 TiB of virtual address space (was 16 GiB, too small for the
+  shadow mappings ASan reserves at startup); emulator jobs keep 8 GiB. The
+  allowance grants no RAM: the cgroup memory limit still stops a job that
+  uses more real memory. The job-side verifier checks the value of each job
+  class.
 - A slot whose unit is in any state other than inactive, failed or not loaded
   (for example deactivating during the stop grace) is busy. `--status` no
   longer sets the shared-group properties.

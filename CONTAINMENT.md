@@ -26,8 +26,13 @@ reference core (`ORACLE_V2.md`). To try a new core build without touching it:
 | --- | --- |
 | Shared group `c55x.slice` (all launches) | memory.max 18 GiB, memory.high 17 GiB, swap 0, 448 tasks, 1000% CPU |
 | One emulator job (slot unit `c55x-emu.service` or `c55x-emu-1.service` .. `c55x-emu-7.service`), descendants included | memory 1 GiB default / 2 GiB hard, swap 0, 32 tasks, 100% CPU, oom.group |
-| One job | 600 s CPU, 900 s wall, 5 s stop grace, 512 fds, no core dumps |
+| One job | 600 s CPU, 900 s wall, 5 s stop grace, 512 fds, no core dumps; virtual address space 8 GiB (emulator) or 64 TiB (work) |
 | Admission | at most eight emulator jobs (one per slot); host MemAvailable >= 16 GiB; work dir not on tmpfs |
+
+The address-space limit is a virtual allowance and grants no RAM. A work job
+gets 64 TiB because sanitizers such as ASan reserve tens of TiB of shadow
+mappings at startup (16 GiB was too small for that); a job that uses more
+real memory than its `--mem` is still stopped by the cgroup (exit 79).
 
 A core built before the eight-slot change caps the shared group at the earlier
 single-slot values (4 GiB, 3 GiB, 64 tasks, 200% CPU) and accepts only

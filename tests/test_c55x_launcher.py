@@ -97,9 +97,15 @@ def fake_job_tree(root, unit, mem_max):
     return job
 
 
-def inner_args(unit, mem):
+def inner_args(unit, mem, as_bytes=8 << 30):
     return argparse.Namespace(unit=unit, mem_bytes=mem, cpu_sec=600,
-                              as_bytes=2 << 30, cmd=["payload", "arg"])
+                              as_bytes=as_bytes, cmd=["payload", "arg"])
+
+
+def good_rlimits(as_bytes=8 << 30):
+    import resource
+    return {resource.RLIMIT_CPU: (600, 600), resource.RLIMIT_NOFILE: (512, 512),
+            resource.RLIMIT_CORE: (0, 0), resource.RLIMIT_AS: (as_bytes, as_bytes)}
 
 
 def wait_until(pred, secs, step=0.2):
@@ -644,8 +650,8 @@ class MockedLauncherTests(unittest.TestCase):
     def test_job_side_verification_execs_only_when_values_match(self):
         import resource
         job = fake_job_tree(self.tmp, EMU_UNIT, 64 << 20)
-        ok = {resource.RLIMIT_CPU: (600, 600), resource.RLIMIT_NOFILE: (512, 512),
-              resource.RLIMIT_CORE: (0, 0), resource.RLIMIT_AS: (2 << 30, 2 << 30)}
+        ok = good_rlimits()
+        os.environ["C55X_CONTAINED_JOB"] = "emulator"
         with mock.patch.object(L, "cgroup2_dir", lambda: job), \
                 mock.patch("resource.getrlimit", lambda r: ok[r]), \
                 mock.patch("os.execvp") as ex:
@@ -673,11 +679,9 @@ class MockedLauncherTests(unittest.TestCase):
             ex.assert_not_called()
 
     def test_job_side_verification_checks_the_slot_unit_and_the_shared_values(self):
-        import resource
         unit = "c55x-emu-5.service"
         job = fake_job_tree(self.tmp, unit, 64 << 20)
-        ok = {resource.RLIMIT_CPU: (600, 600), resource.RLIMIT_NOFILE: (512, 512),
-              resource.RLIMIT_CORE: (0, 0), resource.RLIMIT_AS: (2 << 30, 2 << 30)}
+        ok = good_rlimits()
         os.environ["C55X_CONTAINED_JOB"] = "emulator"
         err = io.StringIO()
         with mock.patch.object(L, "cgroup2_dir", lambda: job), \
@@ -704,6 +708,67 @@ class MockedLauncherTests(unittest.TestCase):
                 self.assertEqual(cm.exception.code, 78)
                 (job.parent / name).write_text(saved)
             ex.assert_not_called()
+
+    def test_job_side_verification_checks_the_address_space_of_each_class(self):
+        tib = 1 << 40
+        self.assertEqual((L.AS_EMULATOR, L.AS_WORK), (8 << 30, 64 * tib))
+        work_unit = "c55x-work-1-abcdef12.service"
+        job = fake_job_tree(self.tmp, work_unit, 64 << 20)
+        err = io.StringIO()
+        with mock.patch.object(L, "cgroup2_dir", lambda: job), \
+                mock.patch.object(L.sys, "stderr", err), \
+                mock.patch("os.execvp") as ex:
+            os.environ["C55X_CONTAINED_JOB"] = "work"
+            with mock.patch("resource.getrlimit", lambda r: good_rlimits(64 * tib)[r]):
+                L.inner_verify(inner_args(work_unit, 64 << 20, 64 * tib))
+                ex.assert_called_once_with("payload", ["payload", "arg"])
+                ex.reset_mock()
+                for wrong in (16 << 30, 8 << 30, 128 * tib):   # the old, the emulator, more
+                    with self.assertRaises(SystemExit) as cm:
+                        L.inner_verify(inner_args(work_unit, 64 << 20, wrong))
+                    self.assertEqual(cm.exception.code, 78)
+                self.assertIn("is not the work value", err.getvalue())
+            # the kernel must report the work value too
+            with mock.patch("resource.getrlimit", lambda r: good_rlimits(16 << 30)[r]):
+                with self.assertRaises(SystemExit) as cm:
+                    L.inner_verify(inner_args(work_unit, 64 << 20, 64 * tib))
+                self.assertEqual(cm.exception.code, 78)
+            # an emulator job keeps 8 GiB and cannot claim the work value
+            os.environ["C55X_CONTAINED_JOB"] = "emulator"
+            with mock.patch("resource.getrlimit", lambda r: good_rlimits(64 * tib)[r]):
+                with self.assertRaises(SystemExit) as cm:
+                    L.inner_verify(inner_args(EMU_UNIT, 64 << 20, 64 * tib))
+                self.assertEqual(cm.exception.code, 78)
+            os.environ.pop("C55X_CONTAINED_JOB")
+            with self.assertRaises(SystemExit) as cm:
+                L.inner_verify(inner_args(work_unit, 64 << 20, 64 * tib))
+            self.assertEqual(cm.exception.code, 78)
+            ex.assert_not_called()
+        self.assertIn("job class None is not emulator or work", err.getvalue())
+
+    def test_launch_asks_systemd_for_the_address_space_of_its_class(self):
+        seen = []
+
+        class FakeProc:
+            def __init__(self, cmd, env=None):
+                seen.append(cmd)
+
+            def wait(self):
+                return 0
+        err = io.StringIO()
+        with mock.patch.object(L, "user_bus_env", lambda: ({}, self.tmp)), \
+                mock.patch.object(L, "mem_available", lambda: 64 << 30), \
+                mock.patch.object(L.subprocess, "Popen", FakeProc), \
+                mock.patch.object(L.sys, "stderr", err):
+            for job, want in (("work", 64 << 40), ("emulator", 8 << 30)):
+                with self.assertRaises(SystemExit) as cm:
+                    L.main(["--job", job, "--mem", "64M", "--work-dir", str(self.tmp / "w"),
+                            "--", "true"])
+                self.assertEqual(cm.exception.code, 0, err.getvalue())
+                cmd = seen.pop()
+                self.assertIn("LimitAS=%d" % want, cmd)
+                self.assertEqual(cmd[cmd.index("--as-bytes") + 1], str(want))
+                self.assertIn("MemoryMax=%d" % (64 << 20), cmd)       # RAM stays bounded
 
 
 if __name__ == "__main__":

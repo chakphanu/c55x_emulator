@@ -12,9 +12,11 @@ scripts that import `c55x_emu`) and any heavy build step must run through
     bin/c55x-contained --job work -- ./rust/build.sh      # builds, cannot run the core
     bin/c55x-contained --status
 
-Compilers and sanitizers use `--job work`. Rust builds can run into the task
-limit (32) when sccache is active; if a build fails with "Unable to install
-ctrlc handler", run it as `RUSTC_WRAPPER= CARGO_BUILD_JOBS=2
+Compilers and sanitizers use `--job work`. A work job may reserve 64 TiB of
+virtual address space (ASan shadow mappings); that grants no RAM, and its
+`--mem` ceiling still stops a job that uses more real memory. Rust builds can
+run into the task limit (32) when sccache is active; if a build fails with
+"Unable to install ctrlc handler", run it as `RUSTC_WRAPPER= CARGO_BUILD_JOBS=2
 bin/c55x-contained --job work --env RUSTC_WRAPPER --env CARGO_BUILD_JOBS -- ./rust/build.sh`.
 
 Exit 75 means all eight emulator slots are busy: wait. Exit 79 or 124 means the
