@@ -82,6 +82,10 @@ fn read(m: &mut Core, p: &Part, out: &mut Pending) -> R<()> {
             let (mut high, mut low) = if *sub { (ah - bh, al - bl) } else { (ah + bh, al + bl) };
             out.carry = Some(if *sub { ((ah & 0xFFFF) >= (bh & 0xFFFF)) as u8 }
                 else { (((ah & 0xFFFF) + (bh & 0xFFFF)) > 0xFFFF) as u8 });
+            // SPRU374E 4.26: overflow is detected on each part (bit 31 high, bit 15 low)
+            // and either one sets ACOVy; SATD saturates each part on its own
+            let in_range = |x: i128| (-32768..=32767).contains(&x);
+            out.ovf = !in_range(high) || !in_range(low);
             if m.st.st1 & ST1_SATD != 0 {
                 high = high.clamp(-32768, 32767);
                 low = low.clamp(-32768, 32767);
@@ -147,6 +151,7 @@ fn commit(m: &mut Core, p: &Part, pend: &mut Pending) -> R<()> {
         Part::DualAlu(d, _, _, _) => {
             m.st.set(*d, v);
             if let Some(carry) = pend.carry { m.st.carry = carry as u32; }
+            if let (true, Reg::Ac(i)) = (pend.ovf, d) { m.st.acov[*i as usize] = 1; }
         }
         Part::HiLoad(acc, _) => {
             // SPRU375E 4.5.3: TAx sign extended (per SXMD) to 40 bits and moved to ACx(31-16)

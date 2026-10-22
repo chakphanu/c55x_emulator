@@ -381,6 +381,24 @@ pub fn carry_of(m: &mut Core, e: &Expr) -> R<Option<Option<u8>>> {
     Ok(None)
 }
 
+/// The effective addresses of the memory operands of e, in evaluation order: the address
+/// phase of an instruction skipped by a false execute(D_Unit) applies their pointer
+/// modifications (SPRU374E 4.28.2).
+pub fn indirect_eas(e: &Expr, out: &mut Vec<Ea>) {
+    match e {
+        Expr::Mem { ea, .. } | Expr::Byte { ea, .. } | Expr::Mar(ea) => out.push(*ea),
+        Expr::UnsignedProduct(a, b) | Expr::SignedAccumulatorProduct(a, b) | Expr::MinMax(a, b, _)
+        | Expr::Bin { a, b, .. } | Expr::AddSub { a, b, .. } => {
+            indirect_eas(a, out);
+            indirect_eas(b, out);
+        }
+        Expr::SignedMemorySquare(x) | Expr::Half(x, _) | Expr::Field { src: x, .. } | Expr::Abs(x)
+        | Expr::Mant(x, _) | Expr::Rnd(x) | Expr::Saturate(x) | Expr::Exp(x) | Expr::Bit(x, _)
+        | Expr::Neg(x) | Expr::Not(x) | Expr::LNot(x) => indirect_eas(x, out),
+        Expr::Num(_) | Expr::Reg(..) | Expr::CarryIn(_) | Expr::Mmr { .. } | Expr::Pair(..) => {}
+    }
+}
+
 pub fn is_acc(e: &Expr) -> bool {
     meta(e).2
 }

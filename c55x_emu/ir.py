@@ -36,6 +36,7 @@ ASSIGN = re.compile(r"(?<![=!<>])=(?!=)")
 FLOW = re.compile(r"^(?:(?:if|compare) \((?P<cond>.+)\) )?(?P<op>goto|call|return_int|return)(?:\s+(?P<target>\S+))?$")
 EXECUTE = re.compile(r"^if \((?P<cond>.+)\) execute\((?:D|AD)_Unit\)$")
 REPEAT = re.compile(r"^repeat\((?:#(\w+)|CSR)\)$")
+REPEAT_CC = re.compile(r"^while \((!?TC1) && \(RPTC < #(\w+)\)\) repeat$")
 PTR_MOD = re.compile(r"\*\(?[+-](AR\d|CDP)|\*\(?(AR\d|CDP)[+-]")
 STATUS_BIT = re.compile(r"^bit\((ST[0-3]), #(\d+)\) = #([01])$")
 # bit set/clear in a register; dis55 prints the bit number of the Baddr form as *SP(#k)
@@ -48,6 +49,12 @@ SUBC = re.compile(r"subc\((.+), (AC[0-3]), (AC[0-3])\)")
 ADDRESS_PHASE = re.compile(r"^(?:(?:X?AR[0-7]|X?CDP) = )?mar\(")
 MAR_TARGET = re.compile(r"^(?:(X?AR[0-7]|X?CDP) = mar\(|mar\(\*?[+-]?\(?(X?AR[0-7]|X?CDP|T[0-3])\b)")
 MANT = re.compile(r"(AC[0-3]) = mant\((AC[0-3])\), (T[0-3]) = exp\(\2\)")
+DUAL_ALU = re.compile(
+    r"HI\((AC[0-3])\) = HI\((.+)\) ([+-]) HI\((.+)\), "
+    r"LO\(\1\) = LO\(\2\) \3 LO\(\4\)"
+)
+BIT_COUNT = re.compile(r"(T[0-3]) = count\((AC[0-3]), (AC[0-3]), (TC[12])\)")
+SQDST = re.compile(r"sqdst\((.+),\s*(.+),\s*(AC[0-3]),\s*(AC[0-3])\)")
 COEF = re.compile(r"coef\((\*\(CDP[+-]T[01]\)|[^()]*)\)")
 COEF_FORMS = ("*CDP", "*CDP+", "*CDP-", "*(CDP+T0)", "*(CDP-T0)", "*(CDP+T1)", "*(CDP-T1)")
 MAR_ARITH = re.compile(r"mar\(((?:X?AR[0-7])|(?:X?CDP)|T[0-3]) ([-+=]) (.+)\)")
@@ -146,6 +153,14 @@ def build(insn, resolve):
         if m:
             repeat = int(m[1], 0) if m[1] else "CSR"
             continue
+        m = REPEAT_CC.match(p)
+        if m:
+            # RPTCC k8, cond: (count, condition, condition field of the encoding)
+            count = int(m[2], 0)
+            if not 0 <= count <= 254:
+                raise NotImplementedError("conditional repeat count outside 0..254")
+            repeat = (count, node(parse(m[1]), False), 0x74 if m[1] == "!TC1" else 0x64)
+            continue
         first = bool(ADDRESS_PHASE.match(p) and len(parts) > 1
                      and mar_first(p, parts))
         out.append((first, _data(p, mmap)))
@@ -158,9 +173,11 @@ def build(insn, resolve):
     if cond is not None and after:
         # SPRU375G 5-160: the partner runs unconditionally, the condition (read in the
         # address phase, before the partner executes) applies to the next instruction
-        if "AD_Unit" not in insn.text or flow:
-            raise NotImplementedError("'previous || if (cond) execute(D_Unit)' or with flow")
-        return ("insn", mmap, *io, out, flow, (cond, 1), *tail)
+        if flow:
+            raise NotImplementedError("'previous || if (cond) execute' with flow")
+        # SWPU067E pp. 5-652..653 also permits previous || XCCPART.
+        mode = 1 if "AD_Unit" in insn.text else 2
+        return ("insn", mmap, *io, out, flow, (cond, mode), *tail)
     if cond is not None and not out and not flow:
         # alone: AD_Unit makes the whole next instruction conditional, D_Unit only its
         # data operations (SPRU375G 5-160, 5-163)
@@ -168,10 +185,12 @@ def build(insn, resolve):
     elif cond is not None:
         if flow:
             raise NotImplementedError("conditional execute bundled with flow")
-        if "D_Unit" in insn.text and "AD_Unit" not in insn.text and \
-                re.search(r"\*\(?[+-]?(AR\d|CDP)[+-]", insn.text):
-            raise NotImplementedError("D_Unit conditional execute with pointer modification")
-        cond = (cond, 0)
+        # Mode 3 retains the unconditional address phase of an XCCPART
+        # partner. The native compiler restricts pointer-updating partners
+        # to the supported single Smem store from a register or constant.
+        pointer_store = ("D_Unit" in insn.text and "AD_Unit" not in insn.text
+                         and skip[0])
+        cond = (cond, 3 if pointer_store else 0)
     return ("insn", mmap, *io, out, flow, cond, *tail)
 
 
@@ -198,6 +217,16 @@ def _dual(text):
     the second with it (all reads of a bundle come before its writes, but address
     updates happen at the read)."""
     if TEST_SET.match(text):
+        return [text]
+    square = SQDST.fullmatch(text)
+    if square:
+        # SPRU374E 4.77: ACy = ACy + (ACx * ACx) :: ACx = (Xmem << #16) - (Ymem << #16).
+        # The subtraction reports its borrow in CARRY every time (sqdst_difference),
+        # unlike SUB Smem << #16, which only clears CARRY on a borrow (4.80.11).
+        xmem, ymem, acc, total = square.groups()
+        return [f"{total} = {total} + sqdst_square({acc})",
+                f"{acc} = sqdst_difference(({xmem} << #16) - ({ymem} << #16))"]
+    if DUAL_ALU.fullmatch(text):
         return [text]
     m = MANT.fullmatch(text)
     if m:
@@ -233,6 +262,13 @@ def _flow(text, nxt, resolve):
 
 
 def _data(text, mmap):
+    count = BIT_COUNT.fullmatch(text)
+    if count:
+        return ("bit_count", *count.groups())
+    dual = DUAL_ALU.fullmatch(text)
+    if dual:
+        return ("dual_alu", dual[1], node(parse(dual[2]), mmap),
+                node(parse(dual[4]), mmap), dual[3] == "-")
     if text in ("nop", "nop_16"):
         return ("nop",)
     m = STATUS_BIT.match(text)

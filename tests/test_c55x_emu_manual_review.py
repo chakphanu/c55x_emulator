@@ -319,5 +319,164 @@ class StatusFlagTests(unittest.TestCase):
         self.assertEqual(cpu.core.acov(), [0, 0, 0, 0])
 
 
+class BitCountTests(unittest.TestCase):
+    """BCNT ACx, ACy, TCx, Tx (SPRU374E 4.9): the 1 bits of ACx AND ACy are
+    counted into Tx; TCx is set when the count is odd, cleared when even."""
+
+    def count(self, ac1, ac2, tc1):
+        cpu, _ = machine(f"bit(ST0, #13) = #{tc1}", "T1 = count(AC1, AC2, TC1)")
+        cpu.ac[1], cpu.ac[2] = ac1, ac2
+        run(cpu)
+        return cpu.t[1], cpu.tc1
+
+    def test_manual_example(self):
+        self.assertEqual(self.count(0x7E_2355_4FC0, 0x0F_E340_5678, 0), (0x000B, 1))
+
+    def test_even_count_clears_tcx(self):
+        self.assertEqual(self.count(0x80_0000_0003, 0x80_0000_0001, 1), (2, 0))
+
+
+class DualArithmeticTests(unittest.TestCase):
+    """Dual 16-bit ADD / SUB with dual(Lmem) (SPRU374E 4.26.3-4.26.5): the
+    high part uses ACx(39-16) and the most significant word, the low part
+    ACx(15-0) and the least significant word (Lmem + 1 at an even address,
+    Lmem - 1 at an odd one). Overflow is detected per part (bit 15 low, bit 31
+    high) and either one sets ACOVy; SATD saturates each part on its own
+    (7FFFh / 8000h, 00 7FFFh / FF 8000h); CARRY is the carry of the high part,
+    extracted at bit 31."""
+
+    ADD = "HI(AC1) = HI(*AR0) + HI(AC0), LO(AC1) = LO(*AR0) + LO(AC0)"
+    SUB = "HI(AC1) = HI(AC0) - HI(*AR0), LO(AC1) = LO(AC0) - LO(*AR0)"
+
+    def run_dual(self, insn, words, ac0, *lines, address=0x1600, carry=0):
+        cpu, bus = machine(*lines, f"XAR0 = mar(*(#0{address:x}h))", insn)
+        for i, w in enumerate(words):
+            bus.write(0x1600 + i, w)
+        cpu.ac[0], cpu.carry = ac0, carry
+        run(cpu)
+        return cpu
+
+    def test_add_at_even_address(self):
+        cpu = self.run_dual(self.ADD, [0x1234, 0x0001], 0x00_0001_0002)
+        self.assertEqual((cpu.ac[1], cpu.carry, cpu.core.acov()), (0x00_1235_0003, 0, [0, 0, 0, 0]))
+
+    def test_add_at_odd_address_takes_the_previous_word(self):
+        cpu = self.run_dual(self.ADD, [0x0001, 0x1234], 0x00_0001_0002, address=0x1601)
+        self.assertEqual(cpu.ac[1], 0x00_1235_0003)
+
+    def test_low_part_overflow_sets_acov(self):
+        for satd, low in ((0, 0x8000), (1, 0x7FFF)):
+            with self.subTest(satd=satd):
+                cpu = self.run_dual(self.ADD, [0x0000, 0x7FFF], 0x00_0000_0001, bit(SATD, satd))
+                self.assertEqual(cpu.ac[1], low)
+                self.assertEqual(cpu.core.acov(), [0, 1, 0, 0])
+
+    def test_high_part_overflow_sets_acov(self):
+        for satd, high in ((0, 0x00_8000), (1, 0x00_7FFF)):
+            with self.subTest(satd=satd):
+                cpu = self.run_dual(self.ADD, [0x7FFF, 0x0000], 0x00_0001_0000, bit(SATD, satd))
+                self.assertEqual(cpu.ac[1], high << 16)
+                self.assertEqual(cpu.core.acov(), [0, 1, 0, 0])
+
+    def test_high_part_carry(self):
+        cpu = self.run_dual(self.ADD, [0xFFFF, 0x0000], 0x00_0001_0000)
+        self.assertEqual((cpu.ac[1], cpu.carry, cpu.core.acov()), (0, 1, [0, 0, 0, 0]))
+
+    def test_subtract_reports_the_high_part_borrow(self):
+        cpu = self.run_dual(self.SUB, [0x1234, 0x0001], 0x00_0001_0002, carry=1)
+        self.assertEqual((cpu.ac[1], cpu.carry), (0xFF_EDCD_0001, 0))
+        cpu = self.run_dual(self.SUB, [0x0001, 0x0001], 0x00_1234_0002)
+        self.assertEqual((cpu.ac[1], cpu.carry), (0x00_1233_0001, 1))
+
+
+class ConditionalRepeatTests(unittest.TestCase):
+    """RPTCC k8, cond (SPRU374E 4.61): while the condition holds the next
+    instruction runs k8 + 1 times; RPTC(15-8) holds the condition code and
+    RPTC(7-0) the number of iterations not performed (0 when the condition
+    never fails). The body is a SUBC, which leaves TC1 unchanged."""
+
+    def repeat(self, cond, tc1):
+        cpu, bus = machine("XAR1 = mar(*(#0200h))", f"bit(ST0, #13) = #{tc1}",
+                           f"while ({cond} && (RPTC < #3)) repeat", "subc(*AR1, AC1, AC1)",
+                           "T0 = RPTC")
+        bus.write(0x200, 0x0100)
+        cpu.ac[1] = 0x00_0746_0000
+        run(cpu)
+        return cpu
+
+    def test_true_condition_runs_k8_plus_1_times(self):
+        cpu = self.repeat("TC1", 1)
+        self.assertEqual((cpu.ac[1], cpu.carry, cpu.t[0]), (0x00_6560_000F, 1, 0x6400))
+
+    def test_false_condition_runs_no_iteration(self):
+        cpu = self.repeat("TC1", 0)
+        self.assertEqual((cpu.ac[1], cpu.t[0]), (0x00_0746_0000, 0x6404))
+
+    def test_negated_condition(self):
+        cpu = self.repeat("!TC1", 0)
+        self.assertEqual((cpu.ac[1], cpu.t[0]), (0x00_6560_000F, 0x7400))
+
+
+class ExecuteConditionallyTests(unittest.TestCase):
+    """XCCPART (SPRU374E 4.28.2): the condition controls the execute phase of
+    the conditional instruction(s); operations of the address phase (pointer
+    updates) are always executed."""
+
+    def test_manual_examples(self):
+        # SPRU374E 4.28.2 examples, XCCPART AR0 != #0 then ADD *AR2+, AC0; the
+        # example's 00 0000 EF0C shows EF00h zero extended, so SXMD = 0
+        for ar0, ac0 in ((0x3000, 0x00_0000_EF0C), (0x0000, 0x00_0000_000C)):
+            with self.subTest(ar0=ar0):
+                cpu, bus = machine(bit(SXMD, 0), f"XAR0 = mar(*(#0{ar0:x}h))", "XAR2 = mar(*(#0405h))",
+                                   "if (AR0 != #0) execute(D_Unit)", "AC0 = AC0 + *AR2+")
+                bus.write(0x405, 0xEF00)
+                cpu.ac[0] = 0x00_0000_000C
+                run(cpu)
+                self.assertEqual((cpu.ac[0], cpu.xar[2]), (ac0, 0x0406))
+
+    def test_after_a_partner(self):
+        # previous_instruction || XCCPART cond: the partner runs unconditionally
+        for tc2, ac0 in ((0, 0x0C), (1, 0x0D)):
+            with self.subTest(tc2=tc2):
+                cpu, bus = machine(f"bit(ST0, #12) = #{tc2}", "XAR2 = mar(*(#01600h))",
+                                   "T1 = #5 || if (TC2) execute(D_Unit)", "AC0 = AC0 + *AR2+")
+                bus.write(0x1600, 1)
+                cpu.ac[0] = 0x0C
+                run(cpu)
+                self.assertEqual((cpu.t[1], cpu.ac[0], cpu.xar[2]), (5, ac0, 0x1601))
+
+    def test_parallel_store_keeps_the_pointer_update(self):
+        for tc1, word in ((0, 0x0000), (1, 0x0009)):
+            with self.subTest(tc1=tc1):
+                cpu, bus = machine(f"bit(ST0, #13) = #{tc1}", "XAR0 = mar(*(#01600h))", "T0 = #9",
+                                   "if (TC1) execute(D_Unit) || *AR0+ = T0")
+                run(cpu)
+                self.assertEqual((bus.read(0x1600), cpu.xar[0]), (word, 0x1601))
+
+
+class SquareDistanceTests(unittest.TestCase):
+    """SQDST Xmem, Ymem, ACx, ACy (SPRU374E 4.77): ACy = ACy + ACx(32-16)^2 in
+    parallel with ACx = (Xmem << #16) - (Ymem << #16); CARRY is the complement
+    of the borrow of that subtraction."""
+
+    def sqdst(self, xmem, ymem, ac0, carry=0):
+        cpu, bus = machine("XAR0 = mar(*(#01600h))", "XAR1 = mar(*(#01601h))",
+                           "sqdst(*AR0,*AR1,AC0,AC1)")
+        bus.write(0x1600, xmem)
+        bus.write(0x1601, ymem)
+        cpu.ac[0], cpu.ac[1], cpu.carry = ac0, 0, carry
+        run(cpu)
+        return cpu
+
+    def test_manual_example(self):
+        cpu = self.sqdst(0x0055, 0x00AA, 0xFF_ABCD_0000)
+        self.assertEqual((cpu.ac[0], cpu.ac[1]), (0xFF_FFAB_0000, 0x00_1BB1_8229))
+        self.assertEqual((cpu.carry, cpu.core.acov()), (0, [0, 0, 0, 0]))
+
+    def test_no_borrow_sets_carry(self):
+        cpu = self.sqdst(0x00AA, 0x0055, 0, carry=0)
+        self.assertEqual((cpu.ac[0], cpu.carry), (0x00_0055_0000, 1))
+
+
 if __name__ == "__main__":
     unittest.main()
