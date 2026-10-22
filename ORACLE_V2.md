@@ -6,15 +6,35 @@ core (SQDST-corrected snapshot; this repository's `8871bc9` is
 byte-identical to its source).
 
 - Build: `bin/c55x-contained --job work -- ./rust/build.sh` -> `build/py/c55x_core.so`
-- SHA256 (reference since 2026-10-22, owner-confirmed):
+- SHA256 (reference since the eight-slot containment):
+  29b184c5635083ba08b81b41dfcf2cc5fe9c72c1bad560d5926c32e673505ab4, built from
+  commit 28aa22b (later commits that do not touch `rust/` do not change it):
+  commit c7c1a9f plus the eight-slot containment guard
+  (`rust/c55x_core/src/policy.rs`: the eight emulator slot units and the
+  shared caps 18 GiB, 17 GiB high, 448 tasks, 1000% CPU). Relative to the
+  previous reference it adds the core changes of f81dbb9 (dual 16-bit ALU
+  overflow in ACOVy) and 1e7b548 (address phase of an instruction skipped by
+  XCCPART) and the Ast refactor c7c1a9f. The guard changes no guest behavior:
+  its only source difference from the main line is `policy.rs`, and the
+  guard alone on the previous reference's source (core e7b0a149) matched
+  6891ce79 on every one of the 465 routine vectors of the set compared. An
+  unmodified source export rebuilds 6891ce79 byte for byte from another
+  directory, so the builds are reproducible. The 1617 routine vectors below
+  give the same status, instruction count,
+  cycles, registers, memory windows, outside writes, trace pcs and ACOV flags
+  on this core as the outputs recorded during the review (core ee19057d).
+- SHA256 of the previous reference (owner-confirmed 2026-10-22):
   6891ce79f76f18485cb890f1f39e304a4c88b37dc02fe851c9077f862662b441, built from
-  commit 6704168 (later documentation-only commits do not change it). It fixes
-  the defects listed under "Defects of the previous reference" below; every
-  change, its evidence and its test are in `CHANGELOG.md`.
-- SHA256 of the previous reference (with resource containment):
+  commit 6704168. It fixes the defects listed under "Defects of the oracle v2
+  builds" below; every change, its evidence and its test are in
+  `CHANGELOG.md`.
+- SHA256 of the earlier reference (with the first containment guard):
   24f97bac9828549532600301ddd03962d2a714a72b2a1ef2326f3c7543b7ed53 (commit
-  1deaa42). Keep a copy outside `build/py` for comparisons and select it with
-  `ZEN_CORE_DIR=<dir>`.
+  1deaa42).
+- 6891ce79, 24f97bac and every other build with the single-slot guard refuse
+  to run under the current launcher (their guard caps the shared group at
+  4 GiB, 3 GiB high, 64 tasks and 200% CPU and accepts only
+  `c55x-emu.service`). Outputs recorded with them stay valid for comparison.
 - SHA256 of the earlier oracle v2 build without the containment guard:
   afcebfd440af00d594e6b7ada8494d174946fafd16681c26bc2cd620e0ef639c (commit 34fd281)
 - The semantic list below and the regression figures in this header describe
@@ -78,12 +98,13 @@ discriminating test.
    no value or cycle change (asserted by test). Citation: none needed
    (trace is an emulator facility). Tests: same file.
 
-## Defects of the previous reference
+## Defects of the oracle v2 builds
 
 Found by a review against SPRU374E, SWPU067E, SPRU371F and the C55x v3.x CPU
-guide in the oracle v2 builds (afcebfd4 / 24f97bac); fixed in the current
-reference (details, evidence and tests in `CHANGELOG.md`). Results obtained
-with the previous reference that depend on these cases should be re-checked.
+guide in the oracle v2 builds (afcebfd4 / 24f97bac); fixed since 6891ce79 and
+in the current reference (details, evidence and tests in `CHANGELOG.md`).
+Results obtained with those builds that depend on these cases should be
+re-checked.
 
 - Overflow of one part of a parallel bundle is reported on another part's
   accumulator (dual MAC: the second MAC's overflow lands in ACOV0; a store

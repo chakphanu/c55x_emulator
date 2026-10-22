@@ -33,9 +33,10 @@ point `ZEN_CORE_DIR` at a core of unknown origin. Moving any pin to a new core
 build needs explicit confirmation from the repository owner.
 
 Earlier reference builds (their SHA256 values are in `ORACLE_V2.md`) may be kept
-in other `build/` directories for regression comparison only. `build/afce/` has
-no containment guard: never use it for new work. The behavior differences
-between builds are listed in `CHANGELOG.md`.
+in other `build/` directories, but the guarded ones (6891ce79, 24f97bac) refuse
+to run under the current shared limits; compare against outputs recorded with
+them instead. `build/afce/` has no containment guard: never use it for new
+work. The behavior differences between builds are listed in `CHANGELOG.md`.
 
 ## Tests
 

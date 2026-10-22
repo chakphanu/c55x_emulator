@@ -206,6 +206,9 @@ Guest behavior is unchanged: only the launcher and the containment guard
   longer sets the shared-group properties.
 - A core built before this change refuses to run under the raised shared
   limits and in slots 1..7; rebuild it.
+- The core built from 28aa22b (SHA256 29b184c5...), commit c7c1a9f plus this
+  guard, is the reference (`ORACLE_V2.md`); its 1,617 routine-vector results
+  match the outputs recorded during the review record for record.
 
 ## Earlier changes
 
