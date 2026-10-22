@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["c55x_core", "c55x_py", "c55x_run"]
+members = ["c55x_core", "c55x_py", "c55x_run", "c55x_fixtures"]
 
 [profile.release]
 opt-level = 3

@@ -348,7 +348,7 @@ fn port_access(flags: &[&String], parts: &[String]) -> (bool, bool) {
 }
 
 /// 'A = .., B = ..' (dual multiply) -> two statements (ir.py _dual).
-fn dual(text: &str) -> R<Vec<String>> {
+pub(super) fn dual(text: &str) -> R<Vec<String>> {
     if test_set(text).is_some() {
         return Ok(vec![text.to_owned()]);
     }

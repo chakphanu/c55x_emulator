@@ -34,6 +34,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "c55x_fixtures"
+version = "0.1.0"
+
+[[package]]
 name = "c55x_py"
 version = "0.1.0"
 dependencies = [

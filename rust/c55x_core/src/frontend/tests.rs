@@ -145,3 +145,152 @@ fn listing_errors_like_listing_py() {
     let open = LISTING.rsplit_once('}').unwrap().0;
     assert_eq!(err(open, true).unwrap(), "unterminated repeat block at 0x020008");
 }
+
+// ---- tests converted from tests/*.py (expected values as the Python tests had them) ----
+
+fn parsed(text: &str) -> String {
+    super::expr::parse(text).map(|e| repr(&e.to_ast())).map_err(message).unwrap()
+}
+
+/// test_c55x_emu.py ParseTests and test_c55x_emu_addressing.py ShortOperandTests.
+mod parse {
+    use super::parsed;
+
+    #[test]
+    fn numbers() {
+        let got: Vec<i64> = ["#8191", "#-1", "#0x020120", "#01600h"].iter()
+            .map(|s| super::super::expr::number(s).ok().unwrap()).collect();
+        assert_eq!(got, [8191, -1, 0x20120, 0x1600]);
+    }
+
+    #[test]
+    fn memory_operands() {
+        assert_eq!(parsed("*+AR2(#0001h)"), "('mem', 'pre', 'AR2', 1)");
+        assert_eq!(parsed("*(AR3+T0)"), "('mem', 'postreg', 'AR3', ('+', 'T0'))");
+        assert_eq!(parsed("*AR3(#009fh)"), "('mem', 'idx', 'AR3', 159)");
+        assert_eq!(parsed("*AR3+"), "('mem', 'post', 'AR3', 1)");
+    }
+
+    #[test]
+    fn multiply_is_not_a_memory_operand() {
+        assert_eq!(parsed("AC0 * T0"), "('bin', '*', ('reg', 'AC0'), ('reg', 'T0'))");
+    }
+
+    #[test]
+    fn short_operand() {
+        assert_eq!(parsed("*AR1(short(#3))"), "('mem', 'short', 'AR1', 3)");
+    }
+}
+
+/// test_c55x_emu_dsp.py MantExpTests (the statement split of ir.py _dual).
+mod dual {
+    use super::super::ir::dual;
+
+    #[test]
+    fn split_indexed_coefficient() {
+        let got = dual("AC0 = (AC0 >> #16) + (*AR2 * coef(*(CDP+T0))), \
+                        AC1 = (AC1 >> #16) + (*AR3 * coef(*(CDP+T0)))").ok().unwrap();
+        assert_eq!(got, ["AC0 = (AC0 >> #16) + (*AR2 * coef(*CDP))",
+                         "AC1 = (AC1 >> #16) + (*AR3 * coef(*(CDP+T0)))"]);
+    }
+
+    #[test]
+    fn split() {
+        assert_eq!(dual("AC2 = mant(AC0), T0 = exp(AC0)").ok().unwrap(), ["AC2 = mant(AC0)", "T0 = mant_exp(AC0)"]);
+    }
+}
+
+/// test_c55x_frontend.py: the synthetic program of rust/fixtures/frontend_synthetic
+/// (asm55 / dis55 -qq -r -g, c55x-fixtures) against the outputs of listing.py and ir.py
+/// frozen in ir.tsv, rejected.tsv and fuzz.tsv.
+mod synthetic {
+    use std::collections::HashMap;
+
+    use super::{message, repr};
+    use crate::frontend::listing::parse;
+    use crate::frontend::{build_text, resolver};
+
+    macro_rules! fixture {
+        ($file:literal) => {
+            include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../fixtures/frontend_synthetic/", $file))
+        };
+    }
+    const LISTING: &str = fixture!("prog.lst");
+
+    /// The rows of a .tsv fixture after its one-line '#' header.
+    fn rows(text: &str) -> impl Iterator<Item = Vec<&str>> {
+        assert!(text.starts_with('#'));
+        text.lines().skip(1).map(|l| l.split('\t').collect())
+    }
+
+    fn hex(v: &str) -> i64 {
+        i64::from_str_radix(v.trim_start_matches("0x"), 16).unwrap()
+    }
+
+    fn outcome(text: &str, addr: i64, size: i64, block_end: Option<i64>, symbols: &HashMap<String, i64>) -> String {
+        let resolve = resolver(symbols);
+        match build_text(text, addr, size, block_end, &resolve) {
+            Ok(ir) => repr(&ir),
+            Err(e) => format!("ERR {}", message(e)),
+        }
+    }
+
+    #[test]
+    fn listing_readers_agree() {
+        let expect: Vec<String> = rows(fixture!("ir.tsv")).map(|r| r[..4].join("\t")).collect();
+        for markers in [true, false] {
+            let got: Vec<String> = parse(LISTING, markers).map_err(message).ok().unwrap().values()
+                .map(|i| format!("0x{:06x}\t{}\t{}\t{}", i.addr, i.size,
+                                 i.block_end.map_or("-".into(), |e| format!("0x{:06x}", e)), i.text))
+                .collect();
+            assert_eq!(got, expect, "markers {}", markers);
+        }
+    }
+
+    #[test]
+    fn listing_errors_agree() {
+        let err = |text: &str| parse(text, true).map_err(message).err().unwrap();
+        let cut = LISTING.replace("0200c6: d68311              AC1 = AC1 + *AR4+\n", "");
+        assert_eq!(err(&cut), "0x0200bf: encoded block end 0x0200c6 differs from dis55 0x0200c3");
+        assert_eq!(err(&format!("{}\n}}", LISTING)), "unbalanced '}' after 0x020118");
+        assert_eq!(err(LISTING.rsplit_once('}').unwrap().0), "unterminated repeat block at 0x0200d3");
+    }
+
+    #[test]
+    fn synthetic_listing() {
+        let none = HashMap::new();
+        let mut n = 0;
+        for r in rows(fixture!("ir.tsv")) {
+            let end = (r[2] != "-").then(|| hex(r[2]));
+            assert_eq!(outcome(r[3], hex(r[0]), r[1].parse().unwrap(), end, &none), r[4], "{}", r[3]);
+            assert!(!r[4].starts_with("ERR"), "{}", r[3]);
+            n += 1;
+        }
+        assert_eq!(n, 98);
+    }
+
+    #[test]
+    fn rejections() {
+        let symbols = HashMap::from([("L1".to_owned(), 0x20010)]);
+        let mut n = 0;
+        for r in rows(fixture!("rejected.tsv")) {
+            assert_eq!(outcome(r[0], 0x20000, 2, None, &symbols), r[1], "{}", r[0]);
+            n += 1;
+        }
+        assert_eq!(n, 15);
+    }
+
+    #[test]
+    fn fuzz() {
+        let none = HashMap::new();
+        let labels = HashMap::from([("L1".to_owned(), 0x1234), ("L2".to_owned(), 0x20000)]);
+        let mut n = 0;
+        for r in rows(fixture!("fuzz.tsv")) {
+            let end = (r[3] != "-").then(|| hex(r[3]));
+            let symbols = if r[4] == "1" { &labels } else { &none };
+            assert_eq!(outcome(r[0], hex(r[1]), r[2].parse().unwrap(), end, symbols), r[5], "{}", r[0]);
+            n += 1;
+        }
+        assert_eq!(n, 3000);
+    }
+}

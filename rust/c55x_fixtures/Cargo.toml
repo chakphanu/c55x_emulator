@@ -1,0 +1,11 @@
+[package]
+name = "c55x_fixtures"
+version = "0.1.0"
+edition = "2021"
+description = "Rebuilds and checks the committed test fixtures (rust/fixtures) with the TI C55x tools"
+
+[[bin]]
+name = "c55x-fixtures"
+path = "src/main.rs"
+
+[dependencies]

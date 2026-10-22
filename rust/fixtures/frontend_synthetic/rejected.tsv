@@ -1,0 +1,16 @@
+# frozen from ir.py at ec5709c: text (addr 0x020000, size 2, symbols L1 = 0x020010), ERR message
+AC0 = AC0 ? AC1	ERR trailing text at 3 in 'AC0 ? AC1'
+AC0 = @NOPE_L || mmap()	ERR memory-mapped register @NOPE_L
+if (TC1) return_int	ERR conditional return_int
+return AC0	ERR return with operand
+repeat(#010)	ERR invalid literal for int() with base 0: '010'
+AC0 = *AR3(AR1)	ERR index form *AR3(AR1)
+AC0 = *AR3 * coef(*CDP+), AC1 = *AR4 * coef(*CDP-)	ERR dual statement with Cmem operands [['*CDP+'], ['*CDP-']]
+TC1 = bit(*AR3+, #2), bit(*AR3+, #2) = #1	ERR bit test-and-set with pointer modification
+while (TC1 && (RPTC < #255)) repeat	ERR conditional repeat count outside 0..254
+repeat(#5) || goto #0x20000	ERR repeat bundled with flow or conditional execute
+AC0 = AC1 || if (TC1) execute(AD_Unit) || goto #0x20000	ERR 'previous || if (cond) execute' with flow
+goto L9	ERR unknown branch target L9
+goto	ERR 'NoneType' object has no attribute 'startswith'
+mar(*AR3+) || AC0 = *AR3 + AR3	ERR AR3 used as address and value next to mar()
+T0,T1 = AC0	ERR multiple destinations
