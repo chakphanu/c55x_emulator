@@ -29,7 +29,9 @@ contained --job work --env CARGO_TARGET_DIR --env RUSTC_WRAPPER --env CARGO_BUIL
     --env CARGO_NET_OFFLINE -- \
     sh -c 'cargo test --manifest-path "$1/rust/Cargo.toml" --workspace --no-run \
            --message-format=json-render-diagnostics > "$2.json"' sh "$ROOT" "$LIST"
-grep '"test":true' "$LIST.json" | grep -o '"executable":"[^"]*"' \
+# test harnesses only: the profile says "test":true (a bin target's own "test":true
+# field would also match the real c55x-run, which needs arguments)
+grep -E '"profile":\{[^}]*"test":true' "$LIST.json" | grep -o '"executable":"[^"]*"' \
     | sed 's/^"executable":"//; s/"$//' > "$LIST"
 rm -f "$LIST.json"
 
