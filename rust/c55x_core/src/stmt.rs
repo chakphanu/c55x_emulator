@@ -3,10 +3,10 @@
 //! parts read and commit first; the flow condition is read before the data, the branch
 //! is taken last.
 
-use pyo3::prelude::*;
 use std::rc::Rc;
 
-use crate::compile::{ea, int, item, node, reg, text, Node};
+use crate::ast::Ast;
+use crate::compile::{ea, int, item, node, reg, text};
 use crate::addr::Ea;
 use crate::core::Core;
 use crate::dest::writable;
@@ -65,7 +65,7 @@ pub struct Insn {
     nxt: u32,
 }
 
-fn cond_node(n: &Node<'_>) -> R<Option<Expr>> {
+fn cond_node(n: &Ast) -> R<Option<Expr>> {
     if n.is_none() { Ok(None) } else { Ok(Some(node(n, false, false, false)?)) }
 }
 
@@ -73,16 +73,15 @@ fn dst(e: Expr) -> R<Expr> {
     if writable(&e) { Ok(e) } else { unsupported("destination is not writable") }
 }
 
-pub fn compile_insn(ir: &Node<'_>, pc: u32, size: u32) -> R<Insn> {
+pub fn compile_insn(ir: &Ast, pc: u32, size: u32) -> R<Insn> {
     let mmap: bool = item(ir, 1)?.extract()?;
     let (io_r, io_w): (bool, bool) = (item(ir, 2)?.extract()?, item(ir, 3)?.extract()?);
     let io = io_r || io_w;
-    let v = |n: &Node<'_>| node(n, false, io, mmap);
+    let v = |n: &Ast| node(n, false, io, mmap);
     let mut parts = Vec::new();
     let mut eas = Vec::new();            // per part: memory operand addresses (part_eas)
     let mut conditional_store_address = None;
     for p in item(ir, 4)?.try_iter()? {
-        let p = p?;
         let first: bool = item(&p, 0)?.extract()?;
         let d = item(&p, 1)?;
         let mut operands = Vec::new();
@@ -90,13 +89,13 @@ pub fn compile_insn(ir: &Node<'_>, pc: u32, size: u32) -> R<Insn> {
             "nop" => Part::Nop,
             "status_bit" => Part::StatusBit(int(&d, 1)? as u32, int(&d, 2)? as u32, int(&d, 3)? != 0),
             "reg_toggle" => Part::RegToggle(reg(&text(&d, 1)?)?, int(&d, 2)? as u32),
-            "test_set" => Part::TestSet(reg(&text(&d, 1)?)?, dst(v(&item(&d, 2)?)?)?, int(&d, 3)? as u32, int(&d, 4)? != 0),
+            "test_set" => Part::TestSet(reg(&text(&d, 1)?)?, dst(v(item(&d, 2)?)?)?, int(&d, 3)? as u32, int(&d, 4)? != 0),
             "reg_bit" => Part::RegBit(reg(&text(&d, 1)?)?, int(&d, 2)? as u32, int(&d, 3)? != 0),
-            "subc" => Part::Subc(v(&item(&d, 1)?)?, reg(&text(&d, 2)?)?, reg(&text(&d, 3)?)?),
+            "subc" => Part::Subc(v(item(&d, 1)?)?, reg(&text(&d, 2)?)?, reg(&text(&d, 3)?)?),
             "bit_count" => Part::BitCount(reg(&text(&d, 1)?)?, reg(&text(&d, 2)?)?,
                                          reg(&text(&d, 3)?)?, reg(&text(&d, 4)?)?),
             "dual_alu" => {
-                let operand = |n: &Node<'_>| -> R<Expr> {
+                let operand = |n: &Ast| -> R<Expr> {
                     if text(n, 0)? == "mem" {
                         Ok(Expr::Mem { ea: ea(n, 2)?, words: 2, port: false, signed: true })
                     } else {
@@ -107,25 +106,25 @@ pub fn compile_insn(ir: &Node<'_>, pc: u32, size: u32) -> R<Insn> {
                         Ok(x)
                     }
                 };
-                Part::DualAlu(reg(&text(&d, 1)?)?, operand(&item(&d, 2)?)?,
-                              operand(&item(&d, 3)?)?, item(&d, 4)?.extract()?)
+                Part::DualAlu(reg(&text(&d, 1)?)?, operand(item(&d, 2)?)?,
+                              operand(item(&d, 3)?)?, item(&d, 4)?.extract()?)
             }
             "push" => {
                 let nodes = item(&d, 1)?;
                 let dbl = item(&d, 2)?;
                 let mut items = Vec::new();
                 for i in 0..nodes.len()? {
-                    items.push((v(&item(&nodes, i)?)?, item(&dbl, i)?.extract()?));
+                    items.push((v(item(&nodes, i)?)?, item(&dbl, i)?.extract()?));
                 }
                 Part::Push(items)
             }
-            "pshboth" => Part::PshBoth(v(&item(&d, 1)?)?),
+            "pshboth" => Part::PshBoth(v(item(&d, 1)?)?),
             "dbl_push_acc" => Part::DblPushAcc(reg(&text(&d, 1)?)?),
-            "mar_arith" => Part::MarArith(dst(v(&item(&d, 1)?)?)?, int(&d, 2)? as i32, v(&item(&d, 3)?)?),
-            "mar" => Part::Mar(v(&item(&d, 1)?)?),
+            "mar_arith" => Part::MarArith(dst(v(item(&d, 1)?)?)?, int(&d, 2)? as i32, v(item(&d, 3)?)?),
+            "mar" => Part::Mar(v(item(&d, 1)?)?),
             "assign" => {
-                let lhs = dst(node(&item(&d, 1)?, false, io_w, mmap)?)?;
-                let rhs = node(&item(&d, 2)?, false, io_r, mmap)?;
+                let lhs = dst(node(item(&d, 1)?, false, io_w, mmap)?)?;
+                let rhs = node(item(&d, 2)?, false, io_r, mmap)?;
                 indirect_eas(&rhs, &mut operands);
                 indirect_eas(&lhs, &mut operands);
                 if let Expr::Mem { ea, words: 1, port: false, .. } = &lhs {
@@ -164,12 +163,12 @@ pub fn compile_insn(ir: &Node<'_>, pc: u32, size: u32) -> R<Insn> {
                 }
                 Part::Assign(Assign::new(lhs, rhs))
             }
-            "popboth" => Part::PopBoth(dst(v(&item(&d, 1)?)?)?),
+            "popboth" => Part::PopBoth(dst(v(item(&d, 1)?)?)?),
             "pop" => {
                 let nodes = item(&d, 1)?;
                 let mut out = Vec::new();
                 for i in 0..nodes.len()? {
-                    out.push(dst(v(&item(&nodes, i)?)?)?);
+                    out.push(dst(v(item(&nodes, i)?)?)?);
                 }
                 Part::Pop(out, item(&d, 2)?.extract()?)
             }
@@ -183,21 +182,21 @@ pub fn compile_insn(ir: &Node<'_>, pc: u32, size: u32) -> R<Insn> {
     }
     let f = item(ir, 5)?;
     let flow = if f.is_none() { None } else {
-        let target = |t: &Node<'_>| -> R<Target> {
+        let target = |t: &Ast| -> R<Target> {
             Ok(if text(t, 0)? == "abs" { Target::Abs(int(t, 1)? as u32) } else { Target::Acc(reg(&text(t, 1)?)?) })
         };
         Some(match text(&f, 0)?.as_str() {
             "return_int" => Flow::ReturnInt,
             "idle" => Flow::Idle,
-            "return" => Flow::Return(cond_node(&item(&f, 1)?)?),
-            "goto" => Flow::Goto(cond_node(&item(&f, 1)?)?, target(&item(&f, 2)?)?),
-            "call" => Flow::Call(cond_node(&item(&f, 1)?)?, target(&item(&f, 2)?)?, int(&f, 3)? as u32),
+            "return" => Flow::Return(cond_node(item(&f, 1)?)?),
+            "goto" => Flow::Goto(cond_node(item(&f, 1)?)?, target(item(&f, 2)?)?),
+            "call" => Flow::Call(cond_node(item(&f, 1)?)?, target(item(&f, 2)?)?, int(&f, 3)? as u32),
             other => return unsupported(format!("flow {}", other)),
         })
     };
     let c = item(ir, 6)?;
     let cond = if c.is_none() { None } else {
-        Some((node(&item(&c, 0)?, false, false, false)?, item(&c, 1)?.extract()?))
+        Some((node(item(&c, 0)?, false, false, false)?, item(&c, 1)?.extract()?))
     };
     if matches!(cond, Some((_, 3))) && (parts.len() != 1
         || conditional_store_address.is_none()
@@ -206,8 +205,8 @@ pub fn compile_insn(ir: &Node<'_>, pc: u32, size: u32) -> R<Insn> {
     }
     let r = item(ir, 7)?;
     let mut repeat_condition = None;
-    let repeat = if r.is_none() { None } else if r.extract::<String>().is_ok() { Some(None) } else if r.is_instance_of::<pyo3::types::PyTuple>() {
-        repeat_condition = Some((node(&item(&r, 1)?, false, false, false)?, int(&r, 2)? as u32));
+    let repeat = if r.is_none() { None } else if r.extract::<String>().is_ok() { Some(None) } else if matches!(r, Ast::Tuple(_)) {
+        repeat_condition = Some((node(item(&r, 1)?, false, false, false)?, int(&r, 2)? as u32));
         Some(Some(int(&r, 0)? as u32))
     } else {
         Some(Some(r.extract::<i64>()? as u32))
