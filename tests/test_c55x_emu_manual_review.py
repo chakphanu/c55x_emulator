@@ -8,7 +8,7 @@ import unittest
 
 from c55x_emu.testutil import machine, run
 
-SATD, SXMD, FRCT = 9, 8, 6
+SATD, SXMD, FRCT, M40 = 9, 8, 6, 10
 
 
 def bit(n, value=1):
@@ -224,6 +224,57 @@ class StatusFlagTests(unittest.TestCase):
         run(cpu)
         self.assertEqual(bus.read(0x1600), 0x7FFF)
         self.assertEqual(cpu.core.acov(), [1, 0, 0, 0])
+
+    def test_add_k16_carry_and_one_address_update(self):
+        # SPRU374E 4.7.16: CARRY at bit 31; the Smem address is evaluated once
+        cpu, bus = machine("XAR0 = mar(*(#01600h))", "*AR0+ = *AR0+ + #1")
+        bus.write(0x1600, 0xFFFF)
+        bus.write(0x1601, 0x1234)
+        run(cpu)
+        self.assertEqual((bus.read(0x1600), bus.read(0x1601)), (0x0000, 0x1234))
+        self.assertEqual((cpu.carry, cpu.core.acov()), (1, [0, 0, 0, 0]))
+        self.assertEqual(cpu.xar[0], 0x1601)
+
+    def test_add_k16_negative_constant_saturates_to_8000h(self):
+        # SPRU374E 4.7.16: "- #k" is ADD #-k, Smem (asm55 / dis55)
+        cpu, bus = machine(bit(SATD), "XAR0 = mar(*(#01600h))", "*AR0 = *AR0 - #1")
+        bus.write(0x1600, 0x8000)
+        run(cpu)
+        self.assertEqual(bus.read(0x1600), 0x8000)
+        self.assertEqual(cpu.core.acov(), [1, 0, 0, 0])
+
+    def test_accumulator_move_saturates_and_sets_st0_bit_9(self):
+        # SPRU374E 4.5.1 with SATD = 1; ACOV1 is bit 9 of ST0_55 (SPRU371F 2.10.1.1)
+        cpu, _ = machine(bit(SATD), "AC1 = AC0", "T0 = @ST0_L || mmap()")
+        cpu.ac[0] = 0x01_E500_0030
+        run(cpu)
+        self.assertEqual(cpu.ac[1], 0x00_7FFF_FFFF)
+        self.assertEqual(cpu.core.acov(), [0, 1, 0, 0])
+        self.assertEqual((cpu.t[0] >> 9) & 1, 1)
+
+    def test_accumulator_move_with_m40_does_not_overflow(self):
+        # SPRU374E 4.5.1: overflow is detected according to M40
+        cpu, _ = machine(bit(M40), "AC1 = AC0")
+        cpu.ac[0] = 0x01_E500_0030
+        run(cpu)
+        self.assertEqual(cpu.ac[1], 0x01_E500_0030)
+        self.assertEqual(cpu.core.acov(), [0, 0, 0, 0])
+
+    def test_repeated_subc_example(self):
+        # SPRU374E 4.25 second example: repeat(CSR) SUBC *AR1, AC1 with CSR = 1,
+        # two steps with divisor 0100h << 15 = 80 0000h:
+        #   0746 0000 - 80 0000 = 06C6 0000 -> 0D8C 0001
+        #   0D8C 0001 - 80 0000 = 0D0C 0001 -> 1A18 0003
+        # SPRU374E (and SWPU067E) print 00 1A18 0007: that low word contradicts
+        # the 4.25 algorithm and the printed high word (three steps would give
+        # 3330 0007), so this test expects the computed value.
+        cpu, bus = machine("XAR1 = mar(*(#0200h))", "CSR = #1", "repeat(CSR)",
+                           "subc(*AR1, AC1, AC1)")
+        bus.write(0x200, 0x0100)
+        cpu.ac[1] = 0x00_0746_0000
+        run(cpu)
+        self.assertEqual((cpu.ac[1], cpu.carry), (0x00_1A18_0003, 1))
+        self.assertEqual(cpu.core.acov(), [0, 0, 0, 0])
 
 
 if __name__ == "__main__":
