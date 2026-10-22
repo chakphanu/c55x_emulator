@@ -445,3 +445,19 @@ tool spelling. The expected values are unchanged:
 | manual_review::status_flag::{acov_is_part_of_st0, bclr_acov0_clears_the_flag} | `AC0 = #0x7FFFFFFF` | the test presets AC0 | asm55 E0003: constant out of range |
 | containment::inside::* | Python host entries (PyCore enter() calls guard_entry) | harness helpers call guard::guard_entry() before Core::run / step / call / ret / advance | the core entries do not check the guard themselves yet (asked: guard_entry inside Core); test_trace_length_cap_is_an_explicit_error stays Python until the cap moves into the core |
 | containment::outside::* | RejectedOutside (skipped in a job) | #[ignore], run by hand outside the launcher (`--ignored outside`) | they must run without the launcher |
+
+## 8. Mutation spot checks
+
+Each mutation was applied to the core in the worktree (not committed). The Rust tests
+were run with scripts/cargo-test-contained, then the file was restored and touched, so
+cargo rebuilds. Every mutation was caught:
+
+| Mutation | Failing Rust tests |
+|---|---|
+| mem.rs read32 pairs `word & !1` / `word \| 1` instead of the addressed word and `word ^ 1` | long_words::memory_load_both_parities_and_postincrement |
+| parts.rs: SUBC does not set the ACOV of its destination | manual_review::status_flag::subc_reports_overflow_without_saturation |
+| parts.rs: ADD K16 to memory does not set ACOV0 | manual_review::status_flag::add_k16_to_memory_saturates_and_reports_acov0, ::add_k16_negative_constant_saturates_to_8000h |
+| frontend ir.rs: the first statement of a dual multiply keeps its coef() pointer update | dsp::dual_multiply::shared_coefficient_read_once, ::fractional_mode_doubles_products, and the frontend tests builds_like_ir_py, dual::split_indexed_coefficient, synthetic::synthetic_listing, synthetic::fuzz |
+
+Trap: restoring a file with `mv` keeps an mtime older than the mutated build, and cargo
+then keeps the mutated binary. Touch the file after restoring it.
