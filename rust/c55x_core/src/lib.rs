@@ -1,6 +1,7 @@
 //! TMS320C55x CPU core for the Python emulator (scripts/c55x_emu, see rust_core.py).
 
 mod addr;
+mod ast;
 mod ata;
 mod ata_pio;
 mod compile;

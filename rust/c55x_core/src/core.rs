@@ -17,6 +17,7 @@ use crate::err::{emu, Error, R};
 use crate::icache::{ICache, PcFilter};
 use crate::mcbsp::McBsp;
 use crate::state::State;
+use crate::ast::Ast;
 use crate::stmt::{compile_insn, Insn};
 
 pub const MEM_BYTES: usize = 1 << 24;
@@ -201,7 +202,7 @@ impl Core {
             let resolve = self.cpu.bind(py).getattr(intern!(py, "resolve"))?;
             let body = match self.ir_build.bind(py).call1((&insn, resolve)) {
                 Err(e) => Body::Unsupported(e.to_string()),
-                Ok(ir) => match compile_insn(&ir, pc, size) {
+                Ok(ir) => match Ast::from_py(&ir).and_then(|ir| compile_insn(&ir, pc, size)) {
                     Ok(i) => Body::Native(i),
                     Err(Error::Unsupported(why)) => Body::Unsupported(why),
                     Err(e) => return Err(e),
