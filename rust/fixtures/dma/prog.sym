@@ -1,0 +1,10 @@
+.text 0x020000
+.text 0x020000
+.text 0x020000
+___text__ 0x020000
+t_block_copy_raises_the_channel_interrupt 0x020000
+e_block_copy_raises_the_channel_interrupt 0x02003d
+t_double_index_interleaves_two_buffers 0x02003f
+e_double_index_interleaves_two_buffers 0x02006d
+___etext__ 0x020070
+etext 0x020070

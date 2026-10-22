@@ -1,5 +1,5 @@
-"""C55x emulator audio path: DMA controller and McBSP0 transmitter of the Rust core
-(rust/c55x_core/src/dma.rs, mcbsp.rs) driven by small programs through I/O ports, the
+"""C55x emulator audio path: McBSP0 transmitter of the Rust core (rust/c55x_core/src/
+mcbsp.rs) driven by small programs through I/O ports (DMA: rust/c55x_core/tests/dma.rs), the
 AIC23 register decoding (codec.py) and fw/hello_audio end to end. HI(ACx) loads:
 rust/c55x_core/tests/semantics.rs."""
 
@@ -20,36 +20,6 @@ CSDP, CCR, CICR, CSR, CSSA_L, CSSA_U, CDSA_L, CDSA_U, CEN, CFN, CFI, CEI = range
 
 def port_writes(base, pairs):
     return [f"*port(#0x{base + r:04x}) = #{v}" for r, v in pairs]
-
-
-class DmaTests(unittest.TestCase):
-    def test_block_copy_raises_the_channel_interrupt(self):
-        prog = port_writes(DMA5, ((CSDP, 1 | 1 << 2 | 1 << 9), (CICR, 0x20), (CSSA_L, 0x6000),
-                                  (CSSA_U, 0), (CDSA_L, 0x8000), (CDSA_U, 0), (CEN, 4), (CFN, 1),
-                                  (CCR, 0x80 | 1 << 12 | 1 << 14)))  # EN, post increment both
-        prog += [f"AR1 = *port(#0x{DMA5 + CSR:04x})", f"AR2 = *port(#0x{DMA5 + CSR:04x})",
-                 f"AR3 = *port(#0x{DMA5 + CCR:04x})"]
-        cpu, bus = machine(*prog)
-        for i in range(4):
-            bus.write(0x3000 + i, 0x100 + i)
-        run(cpu)
-        self.assertEqual([bus.read(0x4000 + i) for i in range(4)], [0x100, 0x101, 0x102, 0x103])
-        self.assertTrue(cpu.ifr0 & (1 << 15))                    # DMAC5 = interrupt 15
-        self.assertEqual([cpu.xar[i] & 0xFFFF for i in (1, 2)], [0x20, 0])   # BLOCK, read clears
-        self.assertFalse(cpu.xar[3] & 0x80)                      # EN cleared at the block end
-
-    def test_double_index_interleaves_two_buffers(self):     # audio_dma_program, SPRU587E
-        diff = 0x200                                         # right - left buffer, bytes
-        prog = port_writes(DMA5, ((CSDP, 1 | 1 << 2 | 1 << 9), (CSSA_L, 0x6000), (CDSA_L, 0x8000),
-                                  (CEN, 2), (CFN, 4), (CEI, diff - 1), (CFI, (1 - diff) & 0xFFFF),
-                                  (CCR, 0x80 | 3 << 12 | 1 << 14)))
-        cpu, bus = machine(*prog)
-        for i in range(4):
-            bus.write(0x3000 + i, 0x100 + i)                 # left
-            bus.write(0x3100 + i, 0x200 + i)                 # right
-        run(cpu)
-        self.assertEqual([bus.read(0x4000 + i) for i in range(8)],
-                         [0x100, 0x200, 0x101, 0x201, 0x102, 0x202, 0x103, 0x203])
 
 
 class McBspStreamTests(unittest.TestCase):

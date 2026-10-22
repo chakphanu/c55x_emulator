@@ -1,0 +1,25 @@
+
+	.sect ".text"
+020000: fb5102050ca0     *port(#00ca0h) = #517
+020006: e651200ca2       *port(#00ca2h) = #32
+02000b: fb5160000ca4     *port(#00ca4h) = #24576
+020011: e651000ca5       *port(#00ca5h) = #0
+020016: fb5180000ca6     *port(#00ca6h) = #-32768
+02001c: e651000ca7       *port(#00ca7h) = #0
+020021: e651040ca8       *port(#00ca8h) = #4
+020026: e651010ca9       *port(#00ca9h) = #1
+02002b: fb5150800ca1     *port(#00ca1h) = #20608
+020031: a9510ca3         AR1 = *port(#00ca3h)
+020035: aa510ca3         AR2 = *port(#00ca3h)
+020039: ab510ca1         AR3 = *port(#00ca1h)
+02003d: 4a7e             goto #0x02003d
+02003f: fb5102050ca0     *port(#00ca0h) = #517
+020045: fb5160000ca4     *port(#00ca4h) = #24576
+02004b: fb5180000ca6     *port(#00ca6h) = #-32768
+020051: e651020ca8       *port(#00ca8h) = #2
+020056: e651040ca9       *port(#00ca9h) = #4
+02005b: fb5101ff0cab     *port(#00cabh) = #511
+020061: fb51fe010caa     *port(#00caah) = #-511
+020067: fb5170800ca1     *port(#00ca1h) = #28800
+02006d: 4a7e             goto #0x02006d
+02006f: 20               nop
