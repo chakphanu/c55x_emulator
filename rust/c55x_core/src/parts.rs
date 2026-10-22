@@ -57,6 +57,10 @@ fn read(m: &mut Core, p: &Part, out: &mut Pending) -> R<()> {
             // independently of M40; the quotient decision still uses bit 39.
             out.carry = Some(((x & 0xFFFF_FFFF) >= (divisor & 0xFFFF_FFFF)) as u8);
             let diff = (x - divisor) & AC_MASK as i128;
+            // SPRU374E 4.25: overflow of the subtraction is detected at bit 31 and
+            // reported in ACOVy, without saturation
+            let signed = sext(diff, 40);
+            out.ovf = signed < -(1i128 << 31) || signed > (1i128 << 31) - 1;
             if diff >> 39 == 0 { (diff << 1) + 1 } else { x << 1 }
         }
         Part::DualAlu(_, a, b, sub) => {
@@ -138,6 +142,7 @@ fn commit(m: &mut Core, p: &Part, pend: &mut Pending) -> R<()> {
         Part::Subc(_, _, d) => {
             m.st.set(*d, v);
             if let Some(carry) = pend.carry { m.st.carry = carry as u32; }
+            if let (true, Reg::Ac(i)) = (pend.ovf, d) { m.st.acov[*i as usize] = 1; }
         }
         Part::DualAlu(d, _, _, _) => {
             m.st.set(*d, v);

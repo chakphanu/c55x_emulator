@@ -188,7 +188,6 @@ class StatusFlagTests(unittest.TestCase):
         self.assertEqual(cpu.ac[1], 0x00_7FFF_0000)
         self.assertEqual(cpu.core.acov(), [0, 1, 0, 0])
 
-    @unittest.expectedFailure       # not fixed yet (F8)
     def test_subc_reports_overflow_without_saturation(self):
         # SPRU374E 4.25 example: SUBC *AR1, AC0, AC1 with SXMD = 0
         cpu, bus = machine(bit(SXMD, 0), "XAR1 = mar(*(#0300h))", "subc(*AR1, AC0, AC1)")
