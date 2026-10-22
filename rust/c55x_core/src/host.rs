@@ -23,6 +23,7 @@ pub struct Ctx {
 }
 
 /// A decoded instruction: its size and text, and its IR or why it is unsupported.
+#[derive(Clone)]
 pub struct Decoded {
     pub size: u32,
     pub text: String,

@@ -5,6 +5,7 @@
 
 use crate::err::{emu, R};
 
+#[derive(Clone)]
 pub enum Ast {
     None,
     Bool(bool),

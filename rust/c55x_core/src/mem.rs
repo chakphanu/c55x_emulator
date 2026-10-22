@@ -9,6 +9,13 @@ impl Core {
         unsafe { *self.mem.add(byte_addr as usize & (MEM_BYTES - 1)) }
     }
 
+    /// Store bytes straight into memory: no MMRs, hooks or code invalidation (Bus.load).
+    pub fn load_bytes(&mut self, byte_addr: u32, data: &[u8]) {
+        for (i, &b) in data.iter().enumerate() {
+            unsafe { *self.mem.add((byte_addr as usize + i) & (MEM_BYTES - 1)) = b }
+        }
+    }
+
     fn hooked(&self, word: u32) -> bool {
         word >= self.hook_lo && self.hooks.iter().any(|&(lo, hi)| lo <= word && word < hi)
     }
