@@ -12,7 +12,18 @@ byte-identical to its source).
   `build/run/c55x-run` (before the binding was removed: `build/py/c55x_core.so`;
   with two cargo jobs the linker can hit the job's
   32-task limit: `posix_spawnp: Resource temporarily unavailable`)
-- SHA256 (current reference): extension
+- SHA256 (current reference): native runner `build/run/c55x-run`
+  515dc807497bf4b67614e8b9cc6edfa0a04acc97e3996ea47f0779715b3d4366, built with
+  `rust/build.sh` from commit 4472eeb (clean `git archive` export; the same
+  hash as the build gated on fa57962, whose source is identical). It is the
+  first reference without any Python: the native host is folded into `Core`
+  (`Core::from_listing` is the only constructor; no host trait), and the board
+  models, the Python binding and the Python slow path are gone. Acceptance:
+  the private 104-file decode set unchanged (PCM and per-call instruction
+  counts), the 1617 routine vectors equal to the recorded observations on
+  every component, all Rust tests under the launcher (209 passed, 2 ignored
+  that run outside a job), throughput unchanged.
+- SHA256 of the previous reference: extension
   9f9c5331c5d7843e69a7610ccffcabc8877c16a1286c384339cc71994d3e668a and native
   runner `build/run/c55x-run`
   e24add9a72a38ecc41a2297d1557b01f7b649ef28706d6c78e921998fe172606, both built
