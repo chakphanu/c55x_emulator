@@ -100,11 +100,13 @@ pub fn shift_acc(m: &mut Core, value: i128, count: i128) -> R<i128> {
     // M40 = 0 works on 32-bit values: the input's guard bits are
     // substituted per SXMD, left shifts extract every bit shifted out past
     // bit 31, right shifts insert at bit 31, overflow is detected at bit
-    // 31 and SATD saturates to the 32-bit extremes. The exact destination
-    // guard-bit rule for signed left shifts of negative inputs (source bit
-    // 31 vs result bit 31) is ambiguous in both manuals; the rule below
-    // (left: guard clear, right: sign-extended) fits every documented
-    // example and is the one real-hardware validation should confirm.
+    // 31 and SATD saturates to the 32-bit extremes. An in-range result keeps
+    // its sign in the guard bits (v3.x CPU 2.10.2.11: with SXMD = 1 bit 31
+    // is copied into the guard bits; SPRU374E 4.70: the shift is performed
+    // on 40 bits). The destination guard bits of an overflowing result
+    // without SATD are ambiguous in both manuals; the rule below (low 32
+    // bits, left: guard clear, right: sign-extended) is an open question
+    // for real-hardware validation.
     let bits = if m40(m) { 40 } else { 32 };
     let mut v = value & ((1i128 << bits) - 1);
     if sx(m) { v = sext(v, bits); }
@@ -115,10 +117,10 @@ pub fn shift_acc(m: &mut Core, value: i128, count: i128) -> R<i128> {
         if satd(m) {
             return Ok(if r > 0 { hi } else { lo });
         }
-    }
-    if bits == 32 {
-        let t = r & ((1i128 << 32) - 1);
-        return Ok(if count >= 0 { t } else { sext(t, 32) });
+        if bits == 32 {
+            let t = r & ((1i128 << 32) - 1);
+            return Ok(if count >= 0 { t } else { sext(t, 32) });
+        }
     }
     Ok(r)
 }
@@ -329,14 +331,8 @@ fn bin(m: &mut Core, op: Op, a: &Expr, b: &Expr, mask: Option<i64>) -> R<i128> {
             } else { count };
             let n = count * if op == Op::Shl { 1 } else { -1 };
             if meta(a).2 {
-                let (wide, signed) = (m40(m), sx(m));
-                let bits = if wide { 40 } else { 32 };
-                let mut v = get(m, a)? & ((1i128 << bits) - 1);
-                if signed { v = sext(v, bits) }
-                let r = shift(v, n)?;
-                // M40 selects input extension and overflow position, not output width.
-                // The accumulator write retains 40 bits and applies SATD if enabled.
-                r
+                let value = get(m, a)?;
+                shift_acc(m, value, n)?
             } else {
                 shift(arith(m, a, false, true, true)?, n)?
             }

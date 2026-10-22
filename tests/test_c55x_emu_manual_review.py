@@ -20,21 +20,18 @@ class SignedShiftSignTests(unittest.TestCase):
     v3.x 2.10.2.9 and 2.10.2.11 ('if SXMD = 1, bit 31 is copied into the
     accumulator's guard bits'); SPRU374E 4.70 ('performed on 40 bits')."""
 
-    @unittest.expectedFailure       # not fixed yet (F5)
     def test_negative_left_shift_without_satd(self):
         cpu, _ = machine("AC0 = #-4", "AC0 = AC0 << #1")
         run(cpu)
         self.assertEqual(cpu.ac[0], 0xFF_FFFF_FFF8)
         self.assertEqual(cpu.core.acov(), [0, 0, 0, 0])
 
-    @unittest.expectedFailure       # not fixed yet (F5)
     def test_negative_left_shift_with_satd(self):
         cpu, _ = machine(bit(SATD), "AC0 = #-4", "AC0 = AC0 << #1")
         run(cpu)
         self.assertEqual(cpu.ac[0], 0xFF_FFFF_FFF8)
         self.assertEqual(cpu.core.acov(), [0, 0, 0, 0])
 
-    @unittest.expectedFailure       # not fixed yet (F5)
     def test_shift_by_zero_sign_extends(self):
         for modes in ((), (SATD,)):
             with self.subTest(modes=modes):
@@ -44,14 +41,12 @@ class SignedShiftSignTests(unittest.TestCase):
                 self.assertEqual(cpu.ac[1], 0xFF_FFFF_FF00)
                 self.assertEqual(cpu.core.acov(), [0, 0, 0, 0])
 
-    @unittest.expectedFailure       # not fixed yet (F5)
     def test_positive_tx_count_on_a_negative_value(self):
         cpu, _ = machine("T0 = #3", "AC0 = #-4", "AC1 = AC0 << T0")
         run(cpu)
         self.assertEqual(cpu.ac[1], 0xFF_FFFF_FFE0)
         self.assertEqual(cpu.core.acov(), [0, 0, 0, 0])
 
-    @unittest.expectedFailure       # not fixed yet (F5)
     def test_add_with_a_shifted_negative_accumulator(self):
         for modes in ((), (SATD,)):
             with self.subTest(modes=modes):
