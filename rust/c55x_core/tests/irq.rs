@@ -36,7 +36,7 @@ fn set_vector(cpu: &mut Core, n: u32, isr: u32) {
     let mut bytes = vec![0xEA, (isr >> 16) as u8, (isr >> 8) as u8, isr as u8];
     bytes.extend([0x5E, 0x80, 0x5F, 0x80]);
     assert!((v as usize) + bytes.len() <= MEM_BYTES);
-    cpu.load_bytes(v, &bytes);
+    assert!(cpu.load_bytes(v, &bytes).is_ok());
 }
 
 /// The CPU of the Python setUp: SP 0x1000, SSP 0x0800, INTM = 0, IVPD 0x0300, IVPH 0x0400,

@@ -23,7 +23,7 @@ fn build() -> Core {
     let mut cpu = fixture!("acov").core("t_flags_are_clear_after_reset");     // AC0 = #0
     let page = [0x5Au8; 1 << 16];
     for addr in (0..MEM_BYTES).step_by(page.len()) {
-        cpu.load_bytes(addr as u32, &page);
+        assert!(cpu.load_bytes(addr as u32, &page).is_ok());
     }
     cpu.st.pc = fixture!("acov").sym("t_flags_are_clear_after_reset");
     run(&mut cpu);

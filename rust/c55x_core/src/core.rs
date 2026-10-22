@@ -12,12 +12,17 @@ use crate::ata::{self, Ata};
 use crate::dma::Dma;
 use crate::err::{emu, Error, R};
 use crate::host::{Ctx, Host};
-use crate::icache::{ICache, PcFilter};
+use crate::icache::{ICache, PcFilter, MAX_CACHED_INSNS};
 use crate::mcbsp::McBsp;
 use crate::state::State;
 use crate::stmt::{compile_insn, Insn};
 
 pub const MEM_BYTES: usize = 1 << 24;
+/// An image cannot exceed the 24-bit program byte address space.
+pub const MAX_IMAGE_BYTES: usize = MEM_BYTES;
+/// Most pcs a trace may hold (4 Mi entries = 16 MiB): a resource cap, not architectural
+/// state.
+pub const MAX_TRACE_LEN: usize = 1 << 22;
 pub const MMR_END: u32 = 0x60;
 const WINDOW_PAGES: u32 = 1024 / 256 + 2; // CodeCache.WINDOW plus margin
 
@@ -75,6 +80,15 @@ impl Core {
         }
     }
 
+    /// Record the last max_len executed pcs (0 switches tracing off).
+    pub fn set_trace(&mut self, max_len: usize) -> R<()> {
+        if max_len > MAX_TRACE_LEN {
+            return emu(format!("trace length {} exceeds the maximum {}", max_len, MAX_TRACE_LEN));
+        }
+        self.trace = if max_len == 0 { None } else { Some((max_len, Default::default())) };
+        Ok(())
+    }
+
     /// The hooked data ranges of the host (peripherals register after the Cpu exists).
     pub fn set_hooks(&mut self, hooks: Vec<(u32, u32)>) {
         self.hooks = hooks;
@@ -128,6 +142,10 @@ impl Core {
     #[inline(never)]
     fn compile_at(&mut self, pc: u32) -> R<Rc<Compiled>> {
         self.compiles += 1;
+        if self.cache.len() >= MAX_CACHED_INSNS {
+            return emu(format!("code cache full: {} instructions (max {}); possible runaway decode",
+                               self.cache.len(), MAX_CACHED_INSNS));
+        }
         let Some(d) = self.host.decode(pc)? else {
             return emu(format!("no decoded instruction at 0x{:06x}", pc));
         };

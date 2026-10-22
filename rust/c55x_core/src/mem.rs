@@ -2,18 +2,22 @@
 //! code-page words through the host, the rest straight in the host's memory buffer.
 
 use crate::core::{Core, MEM_BYTES, MMR_END};
-use crate::err::R;
+use crate::err::{emu, R};
 
 impl Core {
     pub fn mem_byte(&self, byte_addr: u32) -> u8 {
         unsafe { *self.mem.add(byte_addr as usize & (MEM_BYTES - 1)) }
     }
 
-    /// Store bytes straight into memory: no MMRs, hooks or code invalidation (Bus.load).
-    pub fn load_bytes(&mut self, byte_addr: u32, data: &[u8]) {
-        for (i, &b) in data.iter().enumerate() {
-            unsafe { *self.mem.add((byte_addr as usize + i) & (MEM_BYTES - 1)) = b }
+    /// Store bytes straight into memory: no MMRs, hooks or code invalidation (Bus.load);
+    /// bytes beyond the address space are refused, not wrapped.
+    pub fn load_bytes(&mut self, byte_addr: u32, data: &[u8]) -> R<()> {
+        let at = byte_addr as usize;
+        if at + data.len() > MEM_BYTES {
+            return emu(format!("section at 0x{:x} exceeds the address space", byte_addr));
         }
+        unsafe { std::ptr::copy_nonoverlapping(data.as_ptr(), self.mem.add(at), data.len()) }
+        Ok(())
     }
 
     fn hooked(&self, word: u32) -> bool {

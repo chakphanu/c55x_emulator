@@ -3,7 +3,7 @@
 
 
 use crate::core::Core;
-use crate::err::{emu, R};
+use crate::err::{emu, Error, R};
 use crate::state::ST1_INTM;
 
 const PRIORITY: [u32; 25] = [24, 2, 16, 3, 4, 5, 17, 6, 7, 8, 18, 9, 10, 11, 19, 12, 13, 20, 21, 14, 15, 22, 23, 25, 26];
@@ -100,7 +100,19 @@ impl Core {
         Ok(())
     }
 
+    /// Execution entry: enter target like a call instruction returning to ret (-> target).
     pub fn call(&mut self, target: u32, ret: u32) -> R<u32> {
+        entry_guard()?;
+        self.call_insn(target, ret)
+    }
+
+    /// Execution entry: return like a return instruction (-> the return address).
+    pub fn ret(&mut self) -> R<u32> {
+        entry_guard()?;
+        self.ret_insn()
+    }
+
+    pub(crate) fn call_insn(&mut self, target: u32, ret: u32) -> R<u32> {
         self.push((self.st.reta & 0xFFFF) as i128)?;
         self.sys_push(((self.st.cfct << 8) | (self.st.reta >> 16)) as i128)?;
         self.st.reta = ret;
@@ -108,7 +120,7 @@ impl Core {
         Ok(target)
     }
 
-    pub fn ret(&mut self) -> R<u32> {
+    pub(crate) fn ret_insn(&mut self) -> R<u32> {
         let target = self.st.reta;
         self.loop_restore(self.st.cfct)?;
         let hi = self.sys_pop()?;
@@ -176,7 +188,13 @@ impl Core {
         Ok(())
     }
 
+    /// Execution entry: one instruction (an enabled pending interrupt is taken first).
     pub fn step(&mut self) -> R<()> {
+        entry_guard()?;
+        self.step_once()
+    }
+
+    fn step_once(&mut self) -> R<()> {
         if !self.st.skip_next && !self.st.skip_data_next {
             if let Some(n) = self.pending() {
                 self.take(n)?;
@@ -236,6 +254,7 @@ impl Core {
 
     /// Time passes without instructions: fire everything due up to cycles + n.
     pub fn advance(&mut self, n: u64) -> R<()> {
+        entry_guard()?;
         let end = self.st.cycles + n;
         while self.next_any() <= end {
             self.st.cycles = self.st.cycles.max(self.next_any());
@@ -247,10 +266,11 @@ impl Core {
 
     /// Cpu.run: -> true when stuck idle with nothing scheduled.
     pub fn run(&mut self, max_steps: u64, stop: &crate::icache::PcFilter, until: Option<u64>) -> R<bool> {
+        entry_guard()?;
         let idle = self.bios_idle;
         for _ in 0..max_steps {
             let pc = self.st.pc;
-            self.step()?;
+            self.step_once()?;
             if stop.contains(self.st.pc) || until.map_or(false, |u| self.st.cycles >= u) {
                 return Ok(false);
             }
@@ -289,4 +309,10 @@ impl Core {
         s.in_idle = true;
         Ok(addr)
     }
+}
+
+/// The containment check at every execution entry (run, step, call, ret, advance), with
+/// the revalidation interval of guard.rs; the steps inside a run are not entries.
+fn entry_guard() -> R<()> {
+    crate::guard::guard_entry().map_err(Error::Policy)
 }

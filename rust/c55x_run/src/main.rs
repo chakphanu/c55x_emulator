@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use c55x_core::core::{Core, MEM_BYTES};
+use c55x_core::core::{Core, MAX_IMAGE_BYTES, MEM_BYTES};
 use c55x_core::err::Error;
 use c55x_core::guard;
 use c55x_core::frontend::Insn;
@@ -75,8 +75,13 @@ fn load_image(path: &Path) -> Result<(Vec<u8>, String), String> {
         return Err(format!("{}: not a {}-byte c55x-memory-image/1", path.display(), MEM_BYTES));
     }
     let dir = path.parent().unwrap_or(Path::new("."));
+    let segments = field(&image, "segments")?.as_array().ok_or("segments is not a list")?;
+    let total: i128 = segments.iter().map(|s| int_of(s, "bytes")).sum::<Result<_, _>>()?;
+    if total > MAX_IMAGE_BYTES as i128 {
+        return Err(format!("image of {} bytes exceeds the program address space ({})", total, MAX_IMAGE_BYTES));
+    }
     let mut mem = vec![0u8; MEM_BYTES];
-    for seg in field(&image, "segments")?.as_array().ok_or("segments is not a list")? {
+    for seg in segments {
         let file = dir.join(field(seg, "file")?.as_str().ok_or("segment file")?);
         let data = read(&file)?;
         if sha(&data) != field(seg, "sha256")?.as_str().unwrap_or("") || data.len() as i128 != int_of(seg, "bytes")? {
@@ -129,6 +134,7 @@ fn unpack(data: &[u8], how: &str) -> Result<Vec<u16>, String> {
 fn core_error(e: Error) -> (String, String) {
     match e {
         Error::Emu(m) | Error::Unsupported(m) => ("EmulationError".into(), m),
+        Error::Policy(m) => ("ResourcePolicyError".into(), m),
         Error::Host(_) => ("HostError".into(), "host error".into()),
     }
 }
@@ -221,7 +227,7 @@ impl Runner {
                 };
                 let at = int_of(op, "word_address").map_err(bad)? as u32;
                 let bytes: Vec<u8> = words.iter().flat_map(|w| w.to_be_bytes()).collect();
-                self.core.load_bytes(at * 2, &bytes);
+                self.core.load_bytes(at * 2, &bytes).map_err(|e| bad(core_error(e).1))?;
                 Ok(())
             }
             Some("read") => {

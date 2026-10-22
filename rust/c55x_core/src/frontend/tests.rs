@@ -25,7 +25,7 @@ fn repr(a: &Ast) -> String {
 
 fn message(e: Error) -> String {
     match e {
-        Error::Emu(m) | Error::Unsupported(m) => m,
+        Error::Emu(m) | Error::Unsupported(m) | Error::Policy(m) => m,
         Error::Host(_) => "host error".into(),
     }
 }

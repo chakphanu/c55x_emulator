@@ -16,6 +16,7 @@ use crate::err::{emu, Error, R};
 use crate::frontend::{self, Insn};
 use crate::guard;
 use crate::host::{Ctx, Decoded, Host};
+use crate::icache::MAX_CACHED_INSNS;
 
 pub struct NativeHost {
     mem: Vec<u8>,                           // MEM_BYTES; its buffer never moves
@@ -45,6 +46,10 @@ impl NativeHost {
         guard::guard().map_err(|e| Error::Emu(format!("refused outside the managed containment: {}", e)))?;
         if mem.len() != MEM_BYTES {
             return emu(format!("memory of {} bytes, not {}", mem.len(), MEM_BYTES));
+        }
+        if rows.len() > MAX_CACHED_INSNS {
+            return emu(format!("listing of {} instructions exceeds the code cache (max {})",
+                               rows.len(), MAX_CACHED_INSNS));
         }
         let resolve = frontend::resolver(symbols);
         let mut decoded = HashMap::new();
@@ -167,7 +172,9 @@ mod tests {
         core.write(0x1600, 0x1234).ok().unwrap();
         assert_eq!(core.read(0x1600).ok(), Some(0x1234));
         assert_eq!(core.mem_byte(0x2C00), 0x12);
-        core.load_bytes(0x2C02, &[0xAB, 0xCD]);
+        core.load_bytes(0x2C02, &[0xAB, 0xCD]).ok().unwrap();
+        assert!(core.load_bytes(MEM_BYTES as u32 - 1, &[1, 2]).is_err());     // refused, not wrapped
+        assert_eq!(core.mem_byte(0), 0);
         assert_eq!(core.read(0x1601).ok(), Some(0xABCD));
         assert!(core.write(0x10000, 1).is_err());      // byte page 0x200 holds code
         assert!(core.port_read(0x0800).is_err());
@@ -176,6 +183,14 @@ mod tests {
         assert!(core.fetch(0x20002).is_err());
         let host: &NativeHost = core.host.as_any().downcast_ref().unwrap();
         assert_eq!((host.code_page_writes, host.unmodeled_ports), (1, 1));
+    }
+
+    #[test]
+    fn trace_length_is_capped() {
+        let mut core = NativeHost::core(vec![0; MEM_BYTES], HashMap::new()).ok().unwrap();
+        assert!(core.set_trace(crate::core::MAX_TRACE_LEN).is_ok());
+        assert!(core.set_trace(crate::core::MAX_TRACE_LEN + 1).is_err());
+        assert!(core.set_trace(0).is_ok() && core.trace.is_none());
     }
 
     #[test]

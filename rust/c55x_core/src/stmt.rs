@@ -348,8 +348,8 @@ fn exec_body(m: &mut Core, i: &Insn, data: bool) -> R<Option<u32>> {
     Ok(match &i.flow {
         None => None,
         Some(Flow::Goto(_, t)) => { let d = target(m, t); Some(loops_branch(m, d)) }
-        Some(Flow::Call(_, t, ret)) => { let d = target(m, t); Some(m.call(d, *ret)?) }
-        Some(Flow::Return(_)) => Some(m.ret()?),
+        Some(Flow::Call(_, t, ret)) => { let d = target(m, t); Some(m.call_insn(d, *ret)?) }
+        Some(Flow::Return(_)) => Some(m.ret_insn()?),
         Some(Flow::ReturnInt) => Some(m.return_int()?),
         Some(Flow::Idle) => Some(m.idle_insn(i.addr, i.nxt)?),
     })

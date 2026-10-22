@@ -25,7 +25,7 @@ fn to_py<'py>(py: Python<'py>, a: &Ast) -> PyResult<Bound<'py, PyAny>> {
 fn failure<'py>(py: Python<'py>, e: Error) -> PyResult<(bool, Bound<'py, PyAny>)> {
     match e {
         Error::Unsupported(m) | Error::Emu(m) => Ok((false, PyString::new(py, &m).into_any())),
-        Error::Host(_) => Err(pyo3::exceptions::PyRuntimeError::new_err("host error")),
+        Error::Host(_) | Error::Policy(_) => Err(pyo3::exceptions::PyRuntimeError::new_err("host error")),
     }
 }
 

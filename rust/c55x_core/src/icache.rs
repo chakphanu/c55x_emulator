@@ -12,13 +12,23 @@ const PAGES: usize = 1 << (24 - PAGE_BITS);
 
 type Leaf = Box<[Option<Rc<Compiled>>; PAGE]>;
 
+/// Most compiled instructions the cache holds: an engineering cap against a runaway
+/// decode, not architectural.
+pub const MAX_CACHED_INSNS: usize = 1 << 20;
+
 pub struct ICache {
     pages: Vec<Option<Leaf>>,
+    len: usize,
 }
 
 impl ICache {
     pub fn new() -> ICache {
-        ICache { pages: (0..PAGES).map(|_| None).collect() }
+        ICache { pages: (0..PAGES).map(|_| None).collect(), len: 0 }
+    }
+
+    /// Compiled instructions held.
+    pub fn len(&self) -> usize {
+        self.len
     }
 
     #[inline]
@@ -30,13 +40,17 @@ impl ICache {
     pub fn insert(&mut self, pc: u32, c: Rc<Compiled>) {
         let pc = pc as usize & 0xFFFFFF;
         let leaf = self.pages[pc >> PAGE_BITS].get_or_insert_with(|| Box::new(std::array::from_fn(|_| None)));
-        leaf[pc & (PAGE - 1)] = Some(c);
+        if leaf[pc & (PAGE - 1)].replace(c).is_none() {
+            self.len += 1;
+        }
     }
 
     /// Forget every instruction starting in page p (byte address >> 8).
     pub fn drop_page(&mut self, p: u32) {
         if let Some(slot) = self.pages.get_mut(p as usize) {
-            *slot = None;
+            if let Some(leaf) = slot.take() {
+                self.len -= leaf.iter().filter(|c| c.is_some()).count();
+            }
         }
     }
 }

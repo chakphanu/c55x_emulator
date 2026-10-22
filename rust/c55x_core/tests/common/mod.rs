@@ -27,7 +27,7 @@ const SSP_INIT: u32 = 0x0800;
 
 pub fn message(e: Error) -> String {
     match e {
-        Error::Emu(m) | Error::Unsupported(m) => m,
+        Error::Emu(m) | Error::Unsupported(m) | Error::Policy(m) => m,
         Error::Host(_) => "host error".into(),
     }
 }

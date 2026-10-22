@@ -31,16 +31,13 @@ fn guard_entry() -> PyResult<()> {
     c55x_core::guard::guard_entry().map_err(ResourcePolicyError::new_err)
 }
 
-/// Most pcs a trace may hold (4 Mi entries = 16 MiB): a resource cap, not
-/// architectural state.
-const MAX_TRACE_LEN: usize = 1 << 22;
-
 fn to_py(py: Python<'_>, e: Error) -> PyErr {
     match e {
         Error::Host(e) => match e.downcast::<PyErr>() {
             Ok(e) => *e,
             Err(_) => pyo3::exceptions::PyRuntimeError::new_err("host error"),
         },
+        Error::Policy(msg) => ResourcePolicyError::new_err(msg),
         Error::Emu(msg) | Error::Unsupported(msg) => match py.import("c55x_emu.registers") {
             Ok(m) => match m.getattr("EmulationError").and_then(|c| c.call1((msg,))) {
                 Ok(inst) => PyErr::from_value(inst),
@@ -175,11 +172,11 @@ impl PyCore {
 
     /// Record the last max_len executed pcs (0 switches tracing off).
     fn set_trace(&mut self, max_len: usize) -> PyResult<()> {
-        if max_len > MAX_TRACE_LEN {
-            return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                "trace length {} exceeds the maximum {}", max_len, MAX_TRACE_LEN)));
-        }
-        self.core.trace = if max_len == 0 { None } else { Some((max_len, Default::default())) };
+        // c55x_core::core::MAX_TRACE_LEN; refusing it stays a ValueError here
+        self.core.set_trace(max_len).map_err(|e| match e {
+            Error::Emu(m) => pyo3::exceptions::PyValueError::new_err(m),
+            _ => pyo3::exceptions::PyRuntimeError::new_err("set_trace"),
+        })?;
         Ok(())
     }
 

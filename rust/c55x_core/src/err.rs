@@ -8,6 +8,7 @@ use std::any::Any;
 pub enum Error {
     Emu(String),
     Unsupported(String),
+    Policy(String),                     // outside the managed containment (guard.rs)
     Host(Box<dyn Any + Send>),
 }
 
