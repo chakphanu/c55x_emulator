@@ -364,7 +364,6 @@ class DualArithmeticTests(unittest.TestCase):
         cpu = self.run_dual(self.ADD, [0x0001, 0x1234], 0x00_0001_0002, address=0x1601)
         self.assertEqual(cpu.ac[1], 0x00_1235_0003)
 
-    @unittest.expectedFailure       # not fixed yet (F9)
     def test_low_part_overflow_sets_acov(self):
         for satd, low in ((0, 0x8000), (1, 0x7FFF)):
             with self.subTest(satd=satd):
@@ -372,7 +371,6 @@ class DualArithmeticTests(unittest.TestCase):
                 self.assertEqual(cpu.ac[1], low)
                 self.assertEqual(cpu.core.acov(), [0, 1, 0, 0])
 
-    @unittest.expectedFailure       # not fixed yet (F9)
     def test_high_part_overflow_sets_acov(self):
         for satd, high in ((0, 0x00_8000), (1, 0x00_7FFF)):
             with self.subTest(satd=satd):
