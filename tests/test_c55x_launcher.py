@@ -519,7 +519,7 @@ class MockedLauncherTests(unittest.TestCase):
         self.assertEqual(a.acquire(None), EMU_UNIT)
         self.assertEqual(b.acquire(None), "c55x-emu-1.service")       # slot 0 lock is held
         self.assertEqual((self.tmp / "locks" / "emulator-1.lock").read_text(),
-                         "%d\n" % os.getpid())
+                         "%d %d\n" % (os.getpid(), L.MAX_MEM_BYTES))     # pid, memory ceiling
         a.release()
         c = L.Admission()
         self.assertEqual(c.acquire(None), EMU_UNIT)
@@ -653,6 +653,62 @@ class MockedLauncherTests(unittest.TestCase):
                         "--", "true"])
         self.assertEqual(cm.exception.code, 0, err.getvalue())
         self.assertIn("--unit=c55x-emu-7.service", seen[0])
+
+    def hold_old_style_lock(self, k, content):
+        """Hold slot k's lock the way another process would, with content."""
+        (self.tmp / "locks").mkdir(parents=True, exist_ok=True, mode=0o700)
+        fd = os.open(str(self.tmp / "locks" / L.slot_lock(k)), os.O_CREAT | os.O_RDWR, 0o600)
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        os.ftruncate(fd, 0)
+        os.write(fd, content)
+        self.addCleanup(os.close, fd)
+        return fd
+
+    def test_memory_admission_counts_held_locks_and_orphans(self):
+        gib, mib = 1 << 30, 1 << 20
+        a, b = L.Admission(), L.Admission()
+        self.assertEqual(a.acquire(None, mem=gib), EMU_UNIT)
+        self.assertEqual(b.acquire(None, mem=256 * mib), "c55x-emu-1.service")
+        self.assertEqual(b.memory_of_others(None), gib)              # a's recorded ceiling
+        self.assertEqual(a.memory_of_others(None), 256 * mib)
+        # an orphan (unit running, lock free) counts its MemoryMax, unknown counts 2 GiB
+        self.states = {"c55x-emu-5.service": "active", "c55x-emu-9.service": "active"}
+        self.props = {"c55x-emu-5.service": {"MemoryMax": str(gib)},
+                      "c55x-emu-9.service": {"MemoryMax": "infinity"}}
+        self.assertEqual(b.memory_of_others(None), gib + gib + 2 * gib)
+        self.states, self.props = {}, {}
+        # an older launcher records only its pid: the unit's MemoryMax, else 2 GiB
+        fd = self.hold_old_style_lock(3, b"12345\n")
+        self.assertEqual(b.memory_of_others(None), gib + 2 * gib)
+        self.props = {"c55x-emu-3.service": {"MemoryMax": str(512 * mib)}}
+        self.assertEqual(b.memory_of_others(None), gib + 512 * mib)
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        # a released lock no longer counts, whatever its file still says
+        a.release()
+        self.assertEqual(b.memory_of_others(None), 0)
+        self.assertIn(b"%d" % gib, (self.tmp / "locks" / "emulator.lock").read_bytes())
+        # /proc/locks unreadable: every existing lock file counts as held (stricter):
+        # slot 0's stale record and slot 3's pid-only file (its unit's MemoryMax)
+        with mock.patch.object(L, "held_flocks", lambda: None):
+            self.assertEqual(b.memory_of_others(None), gib + 512 * mib)
+        b.release()
+
+    def test_launcher_exits_75_when_the_memory_ceilings_would_exceed_memory_high(self):
+        gib = 1 << 30
+        holders = [L.Admission() for _ in range(8)]
+        for h in holders:
+            self.assertIsNotNone(h.acquire(None, mem=2 * gib))        # 16 GiB in use
+        code, err = self._launch_mocked(lambda: None, 0, ("--mem", "2G"))
+        self.assertEqual(code, 75, err)
+        self.assertIn("outcome=busy memory admission", err)
+        self.assertIn("(16384 MiB) plus --mem (2048 MiB) exceed the shared memory.high "
+                      "(17408 MiB)", err)
+        self.assert_slot_lock_free("emulator-8.lock")                # its slot was given back
+        self.assertFalse([c for c in self.calls if c[0] == "set-property"])
+        code, err = self._launch_mocked(lambda: None, 0, ("--mem", "1G"))   # exactly 17 GiB
+        self.assertEqual(code, 0, err)
+        for h in holders:
+            h.release()
 
     def _launch_mocked(self, on_wait, rc, argv=("--mem", "64M")):
         """L.main for one launch whose systemd-run is a fake: on_wait runs

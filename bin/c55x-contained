@@ -224,17 +224,74 @@ def slot_count(legacy=False):
     return n
 
 
+def held_flocks():
+    """Inode numbers of every file with an exclusive flock, read from
+    /proc/locks (read-only: unlike a probing flock it never makes another
+    launcher see a free slot as held). Only the inode is compared: the device
+    printed there need not equal stat's st_dev (btrfs subvolumes), and an
+    inode of another filesystem can only make a free slot count as held,
+    the stricter side. None if it cannot be read."""
+    held = set()
+    try:
+        with open("/proc/locks") as f:
+            for line in f:
+                p = line.split()
+                if len(p) >= 6 and p[1] == "FLOCK" and p[3] == "WRITE":
+                    held.add(int(p[5].rsplit(":", 1)[1]))
+    except (OSError, ValueError, IndexError):
+        return None
+    return held
+
+
+def memory_max(env, unit):
+    """MemoryMax of a unit in bytes; MAX_MEM_BYTES when unknown or unlimited."""
+    v = unit_props(env, unit, "MemoryMax").get("MemoryMax", "")
+    return int(v) if v.isdigit() else MAX_MEM_BYTES
+
+
 class Admission:
-    """Per-user emulator slots. Slot k is an advisory lock (owner pid
-    recorded) plus a fixed unit name, so a job orphaned by a dead launcher
-    still blocks its own slot until it ends."""
+    """Per-user emulator slots. Slot k is an advisory lock (owner pid and
+    memory ceiling recorded) plus a fixed unit name, so a job orphaned by a
+    dead launcher still blocks its own slot until it ends."""
 
     def __init__(self):
         self.fd = None
         self.unit = None
+        self.slot = None
         self.busy = []
 
-    def acquire(self, env, legacy=False):
+    def memory_of_others(self, env):
+        """Sum of the memory ceilings of the other emulator slots in use: a
+        held lock counts the ceiling its launcher recorded (an older launcher
+        records none: the unit's MemoryMax, else MAX_MEM_BYTES), a unit
+        running without its lock (orphan) its MemoryMax. Called after this
+        launcher recorded its own ceiling, so of two launchers admitting at
+        the same time at least one counts the other."""
+        held = held_flocks()
+        total = 0
+        for k in range(SLOTS):
+            if k == self.slot:
+                continue
+            unit, path = slot_unit(k), LOCK_DIR / slot_lock(k)
+            try:
+                ino = path.stat().st_ino
+                locked = held is None or ino in held
+            except FileNotFoundError:          # never taken, so not held
+                locked = False
+            if locked:
+                try:
+                    fields = path.read_text().split()
+                except OSError:
+                    fields = []
+                if len(fields) >= 2 and fields[1].isdigit():
+                    total += int(fields[1])
+                else:                      # being written, or an older launcher
+                    total += memory_max(env, unit)
+            elif not state_is_free(unit_state(env, unit)):
+                total += memory_max(env, unit)
+        return total
+
+    def acquire(self, env, legacy=False, mem=MAX_MEM_BYTES):
         """Take the first slot whose lock is free and whose unit is
         inactive, failed or not loaded (legacy: only slots 0..LEGACY_SLOTS-1).
         Returns its unit name, or None with self.busy describing every slot
@@ -258,8 +315,8 @@ class Admission:
                 self.busy.append("%s %s" % (unit, state or "state unreadable"))
                 continue
             os.ftruncate(fd, 0)
-            os.write(fd, b"%d\n" % os.getpid())
-            self.fd, self.unit = fd, unit
+            os.write(fd, b"%d %d\n" % (os.getpid(), mem))
+            self.fd, self.unit, self.slot = fd, unit, k
             return unit
         return None
 
@@ -445,12 +502,18 @@ def run_job(args):
     adm = None
     if args.job == "emulator":
         adm = Admission()
-        unit = adm.acquire(env, args.legacy_slots)
+        unit = adm.acquire(env, args.legacy_slots, mem)
         if unit is None:
             die(RC_BUSY, "busy", "all %d %semulator slots are busy (%s); wait for one (a unit "
                 "running without a launcher stops by itself within its wall-time limit)"
                 % (slot_count(args.legacy_slots), "legacy " if args.legacy_slots else "",
                    ", ".join(adm.busy) or "none configured"))
+        others = adm.memory_of_others(env)
+        if others + mem > SLICE_MEM_HIGH:
+            adm.release()
+            die(RC_BUSY, "busy", "memory admission: the other emulator jobs' ceilings (%d MiB) "
+                "plus --mem (%d MiB) exceed the shared memory.high (%d MiB); wait for one to end "
+                "or use a smaller --mem" % (others >> 20, mem >> 20, SLICE_MEM_HIGH >> 20))
         systemctl(env, "reset-failed", unit)      # clear only a finished leftover
     else:
         unit = "c55x-work-%d-%s.service" % (os.getpid(), uuid.uuid4().hex[:8])

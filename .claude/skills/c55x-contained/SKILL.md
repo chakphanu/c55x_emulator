@@ -65,9 +65,12 @@ decision.
   busy). Cores built before the ten-slot change (the archived extension
   `build/archive-python/c55x_core.so`, runner builds up to 515dc807) refuse
   slots 8 and 9: launch them with `--legacy-slots`, which takes only slots
-  0-7 and gets exit 75 when those eight are busy. A job orphaned by a dead
-  launcher keeps its limits and its slot until it stops by itself at its
-  wall-time limit; nothing is killed to make room. Only this class can construct a `Core`.
+  0-7 and gets exit 75 when those eight are busy. A launch also waits (exit
+  75) while its `--mem` plus the other emulator jobs' ceilings would exceed
+  the shared 17 GiB memory.high; c55x-run needs only `--mem 256M`. A job
+  orphaned by a dead launcher keeps its limits and its slot until it stops by
+  itself at its wall-time limit; nothing is killed to make room. Only this
+  class can construct a `Core`.
 - `work`: for compilers and sanitizers; several can run at once. Virtual
   address space is 64 TiB, because ASan and other sanitizers reserve tens of
   TiB of shadow mappings at startup. That is a virtual allowance only and
@@ -88,7 +91,7 @@ cgroup files and rlimits and refuses to continue if any differs.
 | any other non-zero | The payload's own exit status (reserved codes below are remapped to 70) | Read its output |
 | 70 | Incomplete result, or the payload exited with a reserved code | Treat as failure; read stderr |
 | 74 | Host headroom below 16 GiB | Wait; do not free memory by killing other programs |
-| 75 | All ten emulator slots busy (with `--legacy-slots`: slots 0-7) | Wait for one; never kill or clear it |
+| 75 | All ten emulator slots busy (with `--legacy-slots`: slots 0-7), or memory admission: the emulator jobs' `--mem` ceilings would exceed 17 GiB | Wait for one; never kill or clear it; use a small `--mem` for parallel runs |
 | 77 | Policy refused (limits, work dir, user manager, verification) | Fix the reported cause; do not bypass |
 | 79 | Local cgroup OOM: the job hit its memory ceiling | Reduce the workload; do not raise `--mem` yourself |
 | 124 | Wall-time or CPU-time limit | Split the work; do not raise limits yourself |

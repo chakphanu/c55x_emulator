@@ -48,7 +48,8 @@ run into the task limit (32) when sccache is active; if a build fails with
 "Unable to install ctrlc handler", run it as `RUSTC_WRAPPER= CARGO_BUILD_JOBS=2
 bin/c55x-contained --job work --env RUSTC_WRAPPER --env CARGO_BUILD_JOBS -- ./rust/build.sh`.
 
-Exit 75 means all ten emulator slots are busy: wait. A core built before the
+Exit 75 means all ten emulator slots are busy, or the emulator jobs' `--mem`
+ceilings would exceed 17 GiB: wait (c55x-run needs only `--mem 256M`). A core built before the
 ten-slot change (the archived Python extension `build/archive-python/c55x_core.so`,
 runner builds up to 515dc807) accepts only slots 0-7: launch it with
 `bin/c55x-contained --legacy-slots`. Exit 79 or 124 means the
