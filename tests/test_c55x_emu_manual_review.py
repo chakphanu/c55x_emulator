@@ -172,7 +172,6 @@ class StatusFlagTests(unittest.TestCase):
         self.assertEqual(cpu.ac[1], 0x01_E500_0030)
         self.assertEqual(cpu.core.acov(), [0, 1, 0, 0])
 
-    @unittest.expectedFailure       # not fixed yet (F11)
     def test_sat_reports_overflow(self):
         # SPRU374E 4.69 example: SAT AC0, AC1
         cpu, _ = machine("AC1 = saturate(AC0)")

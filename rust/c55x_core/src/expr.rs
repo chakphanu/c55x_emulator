@@ -275,8 +275,14 @@ pub fn get(m: &mut Core, e: &Expr) -> R<i128> {
         }
         Expr::Abs(x) => arith(m, x, false, true, false)?.abs(),
         Expr::Rnd(x) => { let v = arith(m, x, false, true, true)?; rnd(m, v) }
-        // saturate (SPRU375G): to 32 bits whatever M40 says
-        Expr::Saturate(x) => arith(m, x, false, true, true)?.clamp(-(1i128 << 31), (1i128 << 31) - 1),
+        // saturate (SPRU375G): to 32 bits whatever M40 says; an overflow at bit 31 is
+        // reported in the destination ACOVy (SPRU374E 4.69)
+        Expr::Saturate(x) => {
+            let v = arith(m, x, false, true, true)?;
+            let s = v.clamp(-(1i128 << 31), (1i128 << 31) - 1);
+            m.ovf_pending |= s != v;
+            s
+        }
         Expr::Exp(x) => {
             let v = sext(get(m, x)?, 40);
             if v == 0 { 0 } else { 39 - (128 - (if v >= 0 { v } else { !v }).leading_zeros() as i128) - 8 }

@@ -51,7 +51,13 @@ pub fn get_fx(e: &Rc<Expr>) -> Fx {
         Expr::Rnd(x) => { let f = arith_fx(x, false, true, true); Box::new(move |m| { let v = f(m)?; Ok(rnd(m, v)) }) }
         Expr::Saturate(x) => {
             let f = arith_fx(x, false, true, true);
-            Box::new(move |m| Ok(f(m)?.clamp(-(1i128 << 31), (1i128 << 31) - 1)))
+            // expr::get: an overflow at bit 31 reports ACOVy (SPRU374E 4.69)
+            Box::new(move |m| {
+                let v = f(m)?;
+                let s = v.clamp(-(1i128 << 31), (1i128 << 31) - 1);
+                m.ovf_pending |= s != v;
+                Ok(s)
+            })
         }
         Expr::Bit(x, k) => { let (f, k) = (raw_fx(x, false, false), *k); Box::new(move |m| Ok((f(m)? >> k) & 1)) }
         Expr::Neg(x) => { let f = arith_fx(x, false, true, false); Box::new(move |m| Ok(-f(m)?)) }
