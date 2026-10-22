@@ -1,5 +1,6 @@
-//! Data memory and I/O space as the core sees them: MMRs in the state, peripheral and
-//! code-page words through the host, the rest straight in the host's memory buffer.
+//! Data memory and I/O space as the core sees them: MMRs in the state, the rest straight
+//! in the core's memory buffer; a data write into a code page and a port outside DMA /
+//! McBSP are errors (counted).
 
 use crate::core::{Core, MEM_BYTES, MMR_END};
 use crate::err::{emu, R};
@@ -14,12 +15,12 @@ impl Core {
         unsafe { std::slice::from_raw_parts(self.mem, MEM_BYTES) }
     }
 
-    /// The whole memory for a host's direct writes (no MMRs, hooks or code invalidation).
+    /// The whole memory for direct writes (no MMRs or code-page check).
     pub fn memory_mut(&mut self) -> &mut [u8] {
         unsafe { std::slice::from_raw_parts_mut(self.mem, MEM_BYTES) }
     }
 
-    /// Store bytes straight into memory: no MMRs, hooks or code invalidation (Bus.load);
+    /// Store bytes straight into memory: no MMRs or code-page check (Bus.load);
     /// bytes beyond the address space are refused, not wrapped.
     pub fn load_bytes(&mut self, byte_addr: u32, data: &[u8]) -> R<()> {
         let at = byte_addr as usize;
@@ -30,17 +31,10 @@ impl Core {
         Ok(())
     }
 
-    fn hooked(&self, word: u32) -> bool {
-        word >= self.hook_lo && self.hooks.iter().any(|&(lo, hi)| lo <= word && word < hi)
-    }
-
     pub fn read(&mut self, word: u32) -> R<u32> {
         let word = word & 0x7FFFFF;
         if word < MMR_END {
             return self.st.mmr(word, None);
-        }
-        if self.hooked(word) {
-            return self.read_hooked(word);
         }
         let b = (2 * word) as usize;
         unsafe { Ok(((*self.mem.add(b) as u32) << 8) | *self.mem.add(b + 1) as u32) }
@@ -53,8 +47,8 @@ impl Core {
             self.st.mmr(word, Some(v))?;
             return Ok(());
         }
-        if self.hooked(word) || self.code_pages[(word >> 7) as usize] {
-            return self.write_python(word, v);
+        if self.code_pages[(word >> 7) as usize] {
+            return self.code_page_write(word);
         }
         let b = (2 * word) as usize;
         unsafe {
@@ -64,17 +58,20 @@ impl Core {
         Ok(())
     }
 
+    /// Nothing is decoded at run time, so code must not change under its instructions.
     #[cold]
     #[inline(never)]
-    fn read_hooked(&mut self, word: u32) -> R<u32> {
-        self.host(|h, ctx| h.read_hooked(ctx, word))
+    fn code_page_write(&mut self, word: u32) -> R<()> {
+        self.code_page_writes += 1;
+        emu(format!("data write into a code page at word 0x{:06x}", word))
     }
 
+    /// Ports outside DMA / McBSP: no peripheral is modeled there.
     #[cold]
     #[inline(never)]
-    fn write_python(&mut self, word: u32, v: u32) -> R<()> {
-        self.py_writes += 1;
-        self.host(|h, ctx| h.write_hooked(ctx, word, v))
+    fn unmodeled_port<T>(&mut self, port: u32, what: &str) -> R<T> {
+        self.unmodeled_ports += 1;
+        emu(format!("unmodeled port 0x{:04x} {}", port, what))
     }
 
     /// Count legal odd long accesses per PC when telemetry is enabled.
@@ -104,7 +101,7 @@ impl Core {
         if let Some(v) = self.dma_read(port).or_else(|| self.mcbsp_read(port)) {
             return Ok(v);
         }
-        self.host(|h, ctx| h.port_read(ctx, port))
+        self.unmodeled_port(port, "read")
     }
 
     pub fn port_write(&mut self, port: u32, v: i128) -> R<()> {
@@ -112,6 +109,6 @@ impl Core {
         if self.dma_write(port, v)? || self.mcbsp_write(port, v)? {
             return Ok(());
         }
-        self.host(|h, ctx| h.port_write(ctx, port, v))
+        self.unmodeled_port(port, "written")
     }
 }

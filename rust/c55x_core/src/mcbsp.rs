@@ -9,7 +9,7 @@
 //! transmitter is in reset, unless PCR.XIOEN makes FSX a GPIO pin (SPRU592E 8.15.1,
 //! table 8-3; Jukebox2 mcbsp_start waits for one before it sets XRST). Out of reset the empty XSR takes the first DXR1 write at once, so the DMA
 //! preloads two words. The slot rate is the codec's sample rate times the words per frame
-//! (cpu.audio_clock(), machine.py); slots are processed in batches of BATCH_FRAMES frames
+//! (Core::set_audio_clock); slots are processed in batches of BATCH_FRAMES frames
 //! on the core's own timer. Without a clock (codec inactive or slave) nothing is sent.
 //! Words of McBSP0 are collected as interleaved stereo (slot 0 = left, DSP format) per
 //! sample rate. The receivers are not modeled (DRR reads 0, RRDY stays 0); McBSP1 has no

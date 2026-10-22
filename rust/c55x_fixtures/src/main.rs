@@ -154,7 +154,6 @@ fn run_inputs(lst: &str, sections: &[(String, u32, Vec<u8>)]) -> Result<Vec<(&'s
         MEM_BYTES, sha(&mem), base, code.len(), sha(code));
     let insns = c55x_core::frontend::listing::parse(lst, true).map_err(|e| match e {
         c55x_core::err::Error::Emu(m) | c55x_core::err::Error::Unsupported(m) | c55x_core::err::Error::Policy(m) => m,
-        c55x_core::err::Error::Host(_) => "listing".into(),
     })?;
     let mut tsv = String::from("# c55x listing/1 (c55x-fixtures, from prog.lst)\n");
     for i in insns.values() {

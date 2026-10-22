@@ -1,5 +1,5 @@
-//! The instruction IR of ir.py as plain data. compile.rs and stmt.rs read an Ast; a host
-//! builds it when it decodes an instruction (the Python host converts the ir.py tuple).
+//! The instruction IR of ir.py as plain data. compile.rs and stmt.rs read an Ast; the
+//! frontend builds it when it decodes a listing row (Core::from_listing).
 //! Access follows the Python rules the compiler relied on: a bool is an int, an int is
 //! not a bool, str / list / tuple are distinct, == compares like Python.
 

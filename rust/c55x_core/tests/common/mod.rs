@@ -1,5 +1,5 @@
 //! Shared helpers of the integration tests: a synthetic program of rust/fixtures runs on a
-//! core over NativeHost::from_listing (the frontend decodes the fixture listing). That
+//! core over Core::from_listing (the frontend decodes the fixture listing). That
 //! constructor checks the containment guard, so these tests run in an emulator job of
 //! bin/c55x-contained (scripts/cargo-test-contained), never outside it.
 
@@ -13,7 +13,6 @@ use c55x_core::core::{Core, MEM_BYTES};
 use c55x_core::err::Error;
 use c55x_core::frontend::{self, listing::Insn};
 use c55x_core::icache::PcFilter;
-use c55x_core::native::NativeHost;
 
 /// Steps testutil.run allowed before the idle loop must be reached.
 pub const MAX_STEPS: u64 = 10_000;
@@ -28,7 +27,6 @@ const SSP_INIT: u32 = 0x0800;
 pub fn message(e: Error) -> String {
     match e {
         Error::Emu(m) | Error::Unsupported(m) | Error::Policy(m) => m,
-        Error::Host(_) => "host error".into(),
     }
 }
 
@@ -68,7 +66,7 @@ impl Fixture {
         *self.symbols.get(label).unwrap_or_else(|| panic!("{}: no symbol {}", self.name, label)) as u32
     }
 
-    /// A core over the fixture (memory and its listing, NativeHost::from_listing) with the
+    /// A core over the fixture (memory and its listing, Core::from_listing) with the
     /// reset state, pc at the label entry. Panics outside the containment.
     pub fn core(&self, entry: &str) -> Core {
         let mut mem = vec![0u8; MEM_BYTES];
@@ -76,7 +74,7 @@ impl Fixture {
             mem[*addr as usize..*addr as usize + data.len()].copy_from_slice(data);
         }
         let rows: Vec<Insn> = self.insns.values().cloned().collect();
-        let mut core = NativeHost::from_listing(mem, &rows, &self.symbols)
+        let mut core = Core::from_listing(mem, &rows, &self.symbols)
             .unwrap_or_else(|e| panic!("{}: {}", self.name, message(e)));
         core.st.st1 = ST1_INIT;
         core.st.st2 = ST2_INIT;

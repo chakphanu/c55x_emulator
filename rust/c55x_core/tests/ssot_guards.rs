@@ -1,7 +1,7 @@
 //! Static guards for the single source of truth (AGENTS.md): the workspace has no
-//! Python binding, the repository no Python besides the launcher and its tests, and only
-//! the core's native host implements its host interface. These tests only read files;
-//! they build no core and need no TI tools.
+//! Python binding, the repository no Python besides the launcher and its tests, and the
+//! core has no host interface (it owns memory, decoded code and clocks). These tests only
+//! read files; they build no core and need no TI tools.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -98,8 +98,7 @@ fn core_source_has_no_python_binding() {
 }
 
 #[test]
-fn only_rust_hosts_implement_host() {
-    let allowed = ["c55x_core/src/native.rs"];
+fn no_host_interface() {
     let root = rust_dir();
     let mut hits = Vec::new();
     for path in rust_files(&root) {
@@ -110,15 +109,18 @@ fn only_rust_hosts_implement_host() {
         let text = read(&path);
         for (n, line) in code_lines(&text) {
             let words: Vec<&str> = line.split_whitespace().collect();
+            let is_host = |w: &str| w == "Host" || w.ends_with("::Host") || w.starts_with("Host<")
+                                    || w.starts_with("Host{") || w.starts_with("Host:");
+            let declares = words.windows(2).any(|w| w[0] == "trait" && is_host(w[1]));
             let implements = words.windows(3).any(|w| {
-                w[0] == "impl" && (w[1] == "Host" || w[1].ends_with("::Host")) && w[2] == "for"
+                (w[0] == "impl" || w[0].starts_with("impl<")) && w[2] == "for" && is_host(w[1])
             });
-            if implements && !allowed.contains(&rel.as_str()) {
+            if declares || implements {
                 hits.push(format!("{}:{}: {}", rel, n, line.trim()));
             }
         }
     }
-    assert!(hits.is_empty(), "Host implemented outside the allowed hosts:\n{}", hits.join("\n"));
+    assert!(hits.is_empty(), "Host interface declared or implemented:\n{}", hits.join("\n"));
 }
 
 fn repo_dir() -> PathBuf {

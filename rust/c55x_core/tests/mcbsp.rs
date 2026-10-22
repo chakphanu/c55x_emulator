@@ -1,18 +1,17 @@
 //! McBSP0 transmitting an audio stream fed by DMA (from the McBspStreamTests of
 //! tests/test_c55x_emu_audio.py). Program: rust/fixtures/mcbsp. The audio clock the
-//! Python tests set as a callable is plain data on the native host (set_audio_clock).
+//! Python tests set as a callable is plain data on the core (Core::set_audio_clock).
 
 mod common;
 
 use c55x_core::core::Core;
-use c55x_core::native::NativeHost;
 use common::{try_run_until, write};
 
 const FRAMES: usize = 8;                                // DMA block: 8 stereo frames
 
 fn machine(name: &str, rate_hz: f64) -> Core {
     let mut cpu = fixture!("mcbsp").core(&format!("t_{}", name));
-    NativeHost::of(&mut cpu).unwrap().set_audio_clock(rate_hz, 108.0);
+    cpu.set_audio_clock(rate_hz, 108.0);
     cpu
 }
 

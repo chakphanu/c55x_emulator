@@ -20,7 +20,6 @@ use c55x_core::err::Error;
 use c55x_core::guard;
 use c55x_core::frontend::Insn;
 use c55x_core::icache::{PcFilter, PcSet};
-use c55x_core::native::NativeHost;
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 
@@ -135,7 +134,6 @@ fn core_error(e: Error) -> (String, String) {
     match e {
         Error::Emu(m) | Error::Unsupported(m) => ("EmulationError".into(), m),
         Error::Policy(m) => ("ResourcePolicyError".into(), m),
-        Error::Host(_) => ("HostError".into(), "host error".into()),
     }
 }
 
@@ -354,7 +352,7 @@ fn run(a: &Args) -> Result<bool, String> {
     let listing_bytes = read(&listing_path)?;
     let listing_sha = sha(&listing_bytes);
     let listing = load_listing(&listing_bytes)?;
-    let mut core = NativeHost::from_listing(mem, &listing, &HashMap::new()).map_err(|e| core_error(e).1)?;
+    let mut core = Core::from_listing(mem, &listing, &HashMap::new()).map_err(|e| core_error(e).1)?;
     let init = field(&script, "initial_state")?.as_object().ok_or("initial_state")?;
     state::initial(&mut core.st, init)?;
     let sentinel = int_of(&script, "return_sentinel")? as u32;
@@ -387,7 +385,6 @@ fn run(a: &Args) -> Result<bool, String> {
 
     let pcm: Vec<u8> = r.output.iter().flat_map(|v| v.to_le_bytes()).collect();
     std::fs::write(a.out.join("output.pcm"), &pcm).map_err(|e| e.to_string())?;
-    let host: &NativeHost = r.core.host.as_any().downcast_ref().ok_or("native host")?;
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let exe_sha = sha(&read(&exe)?);
     let calls: Vec<Value> = r.calls.iter().enumerate().map(|(i, c)| {
@@ -417,8 +414,8 @@ fn run(a: &Args) -> Result<bool, String> {
         "totals": {"calls": r.calls.len(),
                    "instructions": r.calls.iter().map(|c| c.instructions).sum::<u64>(),
                    "cycles": r.calls.iter().map(|c| c.cycles).sum::<u64>(),
-                   "unmodeled_port_accesses": host.unmodeled_ports,
-                   "code_page_writes": host.code_page_writes},
+                   "unmodeled_port_accesses": r.core.unmodeled_ports,
+                   "code_page_writes": r.core.code_page_writes},
     });
     let text = serde_json::to_string_pretty(&run).map_err(|e| e.to_string())? + "\n";
     std::fs::write(a.out.join("run.json"), text).map_err(|e| e.to_string())?;

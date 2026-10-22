@@ -1,15 +1,10 @@
-//! Errors: emulation errors become c55x_emu.registers.EmulationError at the Python
-//! boundary, unsupported instruction forms make the core fall back to Python, and a host
-//! error (for the Python host: the exception raised in a callback) is carried through
-//! unchanged.
-
-use std::any::Any;
+//! Errors: emulation errors, unsupported instruction forms (an instruction the core
+//! cannot compile; executing it is an emulation error) and containment refusals.
 
 pub enum Error {
     Emu(String),
     Unsupported(String),
     Policy(String),                     // outside the managed containment (guard.rs)
-    Host(Box<dyn Any + Send>),
 }
 
 pub type R<T> = Result<T, Error>;

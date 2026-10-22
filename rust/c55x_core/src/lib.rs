@@ -1,7 +1,6 @@
 //! TMS320C55x CPU core: CPU state and semantics, the instruction compiler (from the Ast
-//! of an instruction), the containment guard and the Host interface. No Python: the
-//! Python extension (rust/c55x_py) and the native command-line host (rust/c55x_run) are
-//! built on it.
+//! of an instruction), the frontend that decodes a listing and the containment guard. No
+//! Python: the command-line runner (rust/c55x_run) is built on it.
 
 pub mod addr;
 pub mod ast;
@@ -16,11 +15,9 @@ pub mod fast;
 pub mod frontend;
 pub mod fuse;
 pub mod guard;
-pub mod host;
 pub mod icache;
 pub mod mcbsp;
 pub mod mem;
-pub mod native;
 pub mod parts;
 pub mod policy;
 pub mod run;

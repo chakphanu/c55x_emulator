@@ -219,7 +219,7 @@ impl Core {
             self.exec_compiled(&insn)?
         };
         self.st.cycles += 1;
-        if self.st.cycles >= self.next_any() {
+        if self.st.cycles >= self.next_timer() {
             self.fire_due()?;
         }
         self.st.pc = match new_pc {
@@ -232,7 +232,7 @@ impl Core {
 
     /// Cpu._wait: let time pass to the next event (or to until). -> Some(result) to return.
     fn wait(&mut self, until: Option<u64>, stuck: bool) -> R<Option<bool>> {
-        let nxt = if stuck || self.next_any() == u64::MAX { None } else { Some(self.next_any()) };
+        let nxt = if stuck || self.next_timer() == u64::MAX { None } else { Some(self.next_timer()) };
         if let Some(u) = until {
             if nxt.map_or(true, |n| n > u) {
                 self.st.cycles = self.st.cycles.max(u);
@@ -249,8 +249,8 @@ impl Core {
     pub fn advance(&mut self, n: u64) -> R<()> {
         entry_guard()?;
         let end = self.st.cycles + n;
-        while self.next_any() <= end {
-            self.st.cycles = self.st.cycles.max(self.next_any());
+        while self.next_timer() <= end {
+            self.st.cycles = self.st.cycles.max(self.next_timer());
             self.fire_due()?;
         }
         self.st.cycles = end;
@@ -267,8 +267,7 @@ impl Core {
                 return Ok(false);
             }
             let waited = if self.st.in_idle {
-                let stopped = self.clock_stopped()?;
-                self.wait(until, stopped)?
+                self.wait(until, false)?                // no clock domain model: never stopped
             } else {
                 let stuck = self.st.pc == pc && self.st.loop_active[0] == 0;
                 if !stuck { continue; }
@@ -280,11 +279,13 @@ impl Core {
         Ok(false)
     }
 
-    /// idle (SPRU375G 5-172, idlectl.py): stays on the instruction while the CPU domain is
-    /// idle and no enabled interrupt is flagged; in_idle tells run() about it.
+    /// idle (SPRU375G 5-172): stays on the instruction while the CPU domain is idle and no
+    /// enabled interrupt is flagged; in_idle tells run() about it. Whether the CPU domain
+    /// goes idle depends on the idle configuration, which is not modeled: entering idle is
+    /// an error.
     pub fn idle_insn(&mut self, addr: u32, nxt: u32) -> R<u32> {
-        if !self.st.in_idle && !self.idle_execute()? {
-            return Ok(nxt);                 // CPUI = 0: the CPU keeps running
+        if !self.st.in_idle {
+            return emu("idle without an idle control model".into());
         }
         let s = &mut self.st;
         if s.ifr0 & s.ier0 != 0 || s.ifr1 & s.ier1 != 0 {

@@ -13,7 +13,6 @@ use std::time::Instant;
 use c55x_core::core::{Core, MEM_BYTES};
 use c55x_core::frontend::Insn;
 use c55x_core::icache::MAX_CACHED_INSNS;
-use c55x_core::native::NativeHost;
 use common::message;
 
 fn machine() -> Core {
@@ -26,7 +25,7 @@ mod bus_caps {
     #[test]
     fn address_space_is_the_architectural_16_mib() {
         assert_eq!(MEM_BYTES, 1 << 24);
-        let e = NativeHost::from_listing(vec![0; MEM_BYTES / 2], &[], &HashMap::new()).map_err(message).err().unwrap();
+        let e = Core::from_listing(vec![0; MEM_BYTES / 2], &[], &HashMap::new()).map_err(message).err().unwrap();
         assert!(e.contains("memory of 8388608 bytes"), "{}", e);
     }
 
@@ -61,7 +60,7 @@ mod code_cache_cap {
         assert_eq!(MAX_CACHED_INSNS, 1 << 20);
         let rows: Vec<Insn> = (0..=MAX_CACHED_INSNS as u32)
             .map(|i| Insn { addr: 0x20000 + i, size: 1, text: "nop".into(), block_end: None }).collect();
-        let e = NativeHost::from_listing(vec![0; MEM_BYTES], &rows, &HashMap::new()).map_err(message).err().unwrap();
+        let e = Core::from_listing(vec![0; MEM_BYTES], &rows, &HashMap::new()).map_err(message).err().unwrap();
         assert!(e.contains("exceeds the code cache"), "{}", e);
     }
 }

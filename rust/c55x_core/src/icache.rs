@@ -44,15 +44,6 @@ impl ICache {
             self.len += 1;
         }
     }
-
-    /// Forget every instruction starting in page p (byte address >> 8).
-    pub fn drop_page(&mut self, p: u32) {
-        if let Some(slot) = self.pages.get_mut(p as usize) {
-            if let Some(leaf) = slot.take() {
-                self.len -= leaf.iter().filter(|c| c.is_some()).count();
-            }
-        }
-    }
 }
 
 /// Hasher for sets of code addresses (stop pcs, poll loops), looked up on every step:
