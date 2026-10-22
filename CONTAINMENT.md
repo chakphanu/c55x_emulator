@@ -77,7 +77,8 @@ single-slot values (4 GiB, 3 GiB, 64 tasks, 200% CPU) and accepts only
 | Core guard, inside a job (kernel readback, live revalidation) | `scripts/cargo-test-contained` (rust/c55x_core/tests/containment.rs); trace cap of the binding: `ZEN_CORE_DIR=<dir> bin/c55x-contained -- python3 -m unittest tests.test_c55x_emu_containment` |
 | Rust tests (dropped cores free their memory: tests/lifecycle.rs) | `scripts/cargo-test-contained` |
 | Launcher (real kernel, tiny budgets; run outside a job) | `ZEN_CORE_DIR=<dir> python3 -m unittest tests.test_c55x_launcher` |
-| Pure policy logic (fake trees) and emulator caps | `python3 -m unittest tests.test_c55x_native_policy tests.test_c55x_emu_resource_caps` |
+| Pure policy logic (fake trees) | `scripts/cargo-test-contained` (the unit tests of rust/c55x_core/src/policy.rs) |
+| Emulator caps | `python3 -m unittest tests.test_c55x_emu_resource_caps` |
 
 ## Limits
 
