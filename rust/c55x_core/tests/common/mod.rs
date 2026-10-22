@@ -96,9 +96,22 @@ impl Fixture {
     }
 }
 
+/// The containment check of an execution entry, as every host makes it before running
+/// the core (c55x_py enter(), c55x-run).
+pub fn entry() -> Result<(), String> {
+    c55x_core::guard::guard_entry()
+}
+
 /// Core::run until the idle loop: Ok(true) when it is reached within MAX_STEPS.
 pub fn try_run(core: &mut Core) -> Result<bool, String> {
+    entry()?;
     core.run(MAX_STEPS, &PcFilter::default(), None).map_err(message)
+}
+
+/// One instruction (Cpu.step), after the entry check.
+pub fn try_step(core: &mut Core) -> Result<(), String> {
+    entry()?;
+    core.step().map_err(message)
 }
 
 /// testutil.run: the idle loop must be reached.
@@ -128,7 +141,7 @@ pub fn write32(core: &mut Core, word: u32, v: u32) {
 
 /// One instruction (Cpu.step).
 pub fn step(core: &mut Core) {
-    core.step().unwrap_or_else(|e| panic!("{} (pc 0x{:06x})", message(e), core.st.pc))
+    try_step(core).unwrap_or_else(|e| panic!("{} (pc 0x{:06x})", e, core.st.pc))
 }
 
 /// A cached fixture: one load per test binary.
