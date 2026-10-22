@@ -20,9 +20,8 @@ use c55x_core::icache::PcFilter;
 use common::{message, run, try_run, try_step};
 
 const GIB: u64 = 1 << 30;
-const EMU_UNITS: [&str; 10] = ["c55x-emu.service", "c55x-emu-1.service", "c55x-emu-2.service", "c55x-emu-3.service",
-                               "c55x-emu-4.service", "c55x-emu-5.service", "c55x-emu-6.service", "c55x-emu-7.service",
-                               "c55x-emu-8.service", "c55x-emu-9.service"];
+const EMU_UNITS: [&str; 8] = ["c55x-emu.service", "c55x-emu-1.service", "c55x-emu-2.service", "c55x-emu-3.service",
+                              "c55x-emu-4.service", "c55x-emu-5.service", "c55x-emu-6.service", "c55x-emu-7.service"];
 /// The revalidation interval of guard.rs is 50 ms.
 const PAST_REVALIDATION: Duration = Duration::from_millis(100);
 

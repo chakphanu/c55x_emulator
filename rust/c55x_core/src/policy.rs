@@ -7,9 +7,7 @@
 //!   <cgroup2 mount>/.../c55x.slice/<slot unit>[/nested...]
 //!
 //! where <slot unit> is one of the emulator slot units: c55x-emu.service
-//! (slot 0) or c55x-emu-<k>.service for k = 1..9, spelled exactly. Cores built
-//! before the ten-slot change accept k = 1..7 only; the launcher keeps them in
-//! those slots with --legacy-slots. The shared caps did not change.
+//! (slot 0) or c55x-emu-<k>.service for k = 1..7, spelled exactly.
 //!
 //! Kernel state is the proof; the environment marker is only a hint that
 //! produces a clear error for plain direct calls. This module has no
@@ -29,7 +27,7 @@ use std::path::{Component, Path, PathBuf};
 pub const ENV_JOB: &str = "C55X_CONTAINED_JOB";
 pub const SLICE_NAME: &str = "c55x.slice";
 pub const JOB_UNIT: &str = "c55x-emu.service";
-pub const JOB_SLOTS: u32 = 10;
+pub const JOB_SLOTS: u32 = 8;
 const LAUNCHER_HINT: &str = "use bin/c55x-contained -- CMD...";
 
 const GIB: u64 = 1 << 30;
@@ -394,8 +392,7 @@ Max address space         2147483648           2147483648           bytes     \n
     #[test] fn every_slot_unit_is_admitted() {
         let names = ["c55x-emu.service", "c55x-emu-1.service", "c55x-emu-2.service",
                      "c55x-emu-3.service", "c55x-emu-4.service", "c55x-emu-5.service",
-                     "c55x-emu-6.service", "c55x-emu-7.service", "c55x-emu-8.service",
-                     "c55x-emu-9.service"];
+                     "c55x-emu-6.service", "c55x-emu-7.service"];
         assert_eq!(names.len() as u32, JOB_SLOTS);
         for name in names {
             assert!(is_job_unit(name), "{}", name);
@@ -410,8 +407,8 @@ Max address space         2147483648           2147483648           bytes     \n
         }
     }
     #[test] fn names_outside_the_slot_set_are_refused() {
-        for name in ["c55x-emu-10.service", "c55x-emu-11.service", "c55x-emu-0.service",
-                     "c55x-emu-x.service", "c55x-emu-01.service", "c55x-emu-09.service",
+        for name in ["c55x-emu-8.service", "c55x-emu-9.service", "c55x-emu-0.service",
+                     "c55x-emu-x.service", "c55x-emu-01.service", "c55x-emu-10.service",
                      "c55x-emu-+1.service", "c55x-emu-.service", "c55x-emu-1.scope",
                      "c55x-emu-1.service.d", "c55x-emu1.service", "c55x-emus.service",
                      "C55X-EMU-1.service", "c55x-work-1-abcdef12.service", "c55x-other.service"] {
