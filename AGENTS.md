@@ -37,3 +37,12 @@ baseline. It has no containment guard: never use it for new work.
 
 Run the full suite inside the launcher. Two example tests (`hello_mcu`) fail
 until the example programs are built with the TI tools; that is expected.
+
+## Looking up instruction behavior
+
+Authority order: TI tools (`asm55` / `dis55`) for encodings, TI manuals for
+semantics read across SPRU374E, SPRU371F and the v3.x CPU guide, and this
+emulator only as a differential partner. When it disagrees with the manuals,
+record both citations and tell the owner. Details, section numbers and the
+traps already hit: `.claude/skills/c55x-manuals/SKILL.md`. Cite section numbers;
+do not paste manual text into the repository.
