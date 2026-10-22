@@ -45,6 +45,7 @@ appears on a command line). Numeric-library thread counts are forced to 1.
 | Option | Default | Hard limit | Meaning |
 | --- | --- | --- | --- |
 | `--job emulator\|work` | `emulator` | - | Job class |
+| `--legacy-slots` | off | - | Emulator job only in slots 0-7, for cores built before the ten-slot change |
 | `--mem SIZE` | `1G` | `2G` | Memory ceiling of the whole job tree |
 | `--cpu-sec N` | `600` | `600` | CPU seconds (RLIMIT_CPU) |
 | `--wall-sec N` | `900` | `900` | Lifetime of the job |
@@ -57,13 +58,16 @@ decision.
 
 ## Job classes
 
-- `emulator`: up to eight at a time for this user across all worktrees and
+- `emulator`: up to ten at a time for this user across all worktrees and
   shells, one per slot (units `c55x-emu.service`, `c55x-emu-1.service` ..
-  `c55x-emu-7.service`). A launch takes the first free slot and gets exit 75
-  when all eight are busy (a slot whose unit is still stopping counts as
-  busy). A job orphaned by a dead launcher keeps its limits and its slot
-  until it stops by itself at its wall-time limit; nothing is killed to make
-  room. Only this class can construct a `Core`.
+  `c55x-emu-9.service`). A launch takes the first free slot and gets exit 75
+  when all ten are busy (a slot whose unit is still stopping counts as
+  busy). Cores built before the ten-slot change (the archived extension
+  `build/archive-python/c55x_core.so`, runner builds up to 515dc807) refuse
+  slots 8 and 9: launch them with `--legacy-slots`, which takes only slots
+  0-7 and gets exit 75 when those eight are busy. A job orphaned by a dead
+  launcher keeps its limits and its slot until it stops by itself at its
+  wall-time limit; nothing is killed to make room. Only this class can construct a `Core`.
 - `work`: for compilers and sanitizers; several can run at once. Virtual
   address space is 64 TiB, because ASan and other sanitizers reserve tens of
   TiB of shadow mappings at startup. That is a virtual allowance only and
@@ -84,7 +88,7 @@ cgroup files and rlimits and refuses to continue if any differs.
 | any other non-zero | The payload's own exit status (reserved codes below are remapped to 70) | Read its output |
 | 70 | Incomplete result, or the payload exited with a reserved code | Treat as failure; read stderr |
 | 74 | Host headroom below 16 GiB | Wait; do not free memory by killing other programs |
-| 75 | All eight emulator slots busy | Wait for one; never kill or clear it |
+| 75 | All ten emulator slots busy (with `--legacy-slots`: slots 0-7) | Wait for one; never kill or clear it |
 | 77 | Policy refused (limits, work dir, user manager, verification) | Fix the reported cause; do not bypass |
 | 79 | Local cgroup OOM: the job hit its memory ceiling | Reduce the workload; do not raise `--mem` yourself |
 | 124 | Wall-time or CPU-time limit | Split the work; do not raise limits yourself |

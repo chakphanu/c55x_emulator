@@ -35,7 +35,8 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 LAUNCHER = ROOT / "bin" / "c55x-contained"
 TMP = ROOT / "build" / "test-tmp"
 EMU_UNIT = "c55x-emu.service"
-EMU_UNITS = (EMU_UNIT,) + tuple("c55x-emu-%d.service" % k for k in range(1, 8))
+EMU_UNITS = (EMU_UNIT,) + tuple("c55x-emu-%d.service" % k for k in range(1, 10))
+LEGACY_UNITS = EMU_UNITS[:8]                        # the units older cores accept
 PY = sys.executable
 ONE_SLOT = dict(os.environ, C55X_TEST_SLOTS="1")    # the job can only get EMU_UNIT
 TWO_SLOTS = dict(os.environ, C55X_TEST_SLOTS="2")
@@ -327,8 +328,8 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(launch("--mem", "64M", "--wall-sec", "10", "--", "true",
                                 env=TWO_SLOTS).returncode, 0)
 
-    def test_eight_slots_admit_eight_jobs_and_refuse_a_ninth(self):
-        names = [self.tmp / ("unit-%d" % i) for i in range(8)]
+    def test_ten_slots_admit_ten_jobs_and_refuse_an_eleventh(self):
+        names = [self.tmp / ("unit-%d" % i) for i in range(10)]
         jobs = [subprocess.Popen([str(LAUNCHER), "--mem", "64M", "--wall-sec", "40", "--",
                                   PY, "-c", UNIT_OF_JOB, str(n), "10"], cwd=ROOT)
                 for n in names]
@@ -337,7 +338,26 @@ class LauncherTests(unittest.TestCase):
             self.assertEqual(sorted(n.read_text() for n in names), sorted(EMU_UNITS))
             r = launch("--mem", "64M", "--wall-sec", "10", "--", "true")
             self.assertEqual(r.returncode, 75, r.stderr)
-            self.assertIn("all 8 emulator slots are busy", r.stderr)
+            self.assertIn("all 10 emulator slots are busy", r.stderr)
+        finally:
+            rcs = [j.wait(timeout=60) for j in jobs]
+        self.assertEqual(rcs, [0] * 10)
+
+    def test_legacy_slots_wait_for_slots_0_to_7_while_8_and_9_are_free(self):
+        names = [self.tmp / ("unit-%d" % i) for i in range(8)]
+        jobs = [subprocess.Popen([str(LAUNCHER), "--legacy-slots", "--mem", "64M", "--wall-sec",
+                                  "40", "--", PY, "-c", UNIT_OF_JOB, str(n), "10"], cwd=ROOT)
+                for n in names]
+        try:
+            self.assertTrue(wait_until(lambda: written(*names), 30))
+            self.assertEqual(sorted(n.read_text() for n in names), sorted(LEGACY_UNITS))
+            r = launch("--legacy-slots", "--mem", "64M", "--wall-sec", "10", "--", "true")
+            self.assertEqual(r.returncode, 75, r.stderr)
+            self.assertIn("all 8 legacy emulator slots are busy", r.stderr)
+            got = self.tmp / "unit"                 # a launch without the option gets slot 8
+            r = launch("--mem", "64M", "--wall-sec", "10", "--", PY, "-c", UNIT_OF_JOB, str(got), "0")
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertEqual(got.read_text(), "c55x-emu-8.service")
         finally:
             rcs = [j.wait(timeout=60) for j in jobs]
         self.assertEqual(rcs, [0] * 8)
@@ -480,17 +500,19 @@ class MockedLauncherTests(unittest.TestCase):
         os.environ.pop("C55X_CONTAINED_JOB", None)
 
     def test_slot_names(self):
-        self.assertEqual(L.SLOTS, 8)
+        self.assertEqual((L.SLOTS, L.LEGACY_SLOTS), (10, 8))
         self.assertEqual(L.EMU_UNITS, EMU_UNITS)
-        self.assertEqual([L.slot_unit(k) for k in range(8)], list(EMU_UNITS))
-        self.assertEqual([L.slot_lock(k) for k in (0, 1, 7)],
-                         ["emulator.lock", "emulator-1.lock", "emulator-7.lock"])
+        self.assertEqual([L.slot_unit(k) for k in range(10)], list(EMU_UNITS))
+        self.assertEqual([L.slot_lock(k) for k in (0, 1, 7, 9)],
+                         ["emulator.lock", "emulator-1.lock", "emulator-7.lock", "emulator-9.lock"])
 
     def test_slot_hook_can_only_lower_the_count(self):
-        for inj, want in (("2", 2), ("1", 1), ("0", 0), ("8", 8), ("99", 8), ("-1", 8),
-                          ("x", 8), ("", 8)):
+        for inj, want, legacy in (("2", 2, 2), ("1", 1, 1), ("0", 0, 0), ("8", 8, 8),
+                                  ("9", 9, 8), ("10", 10, 8), ("99", 10, 8), ("-1", 10, 8),
+                                  ("x", 10, 8), ("", 10, 8)):
             os.environ["C55X_TEST_SLOTS"] = inj
             self.assertEqual(L.slot_count(), want, inj)
+            self.assertEqual(L.slot_count(legacy=True), legacy, inj)
 
     def test_first_free_slot_is_taken_and_a_freed_slot_is_reused(self):
         a, b = L.Admission(), L.Admission()
@@ -564,7 +586,7 @@ class MockedLauncherTests(unittest.TestCase):
             with self.assertRaises(SystemExit) as cm:
                 L.main(["--mem", "64M", "--work-dir", str(self.tmp / "w"), "--", "true"])
         self.assertEqual(cm.exception.code, 75)
-        self.assertIn("outcome=busy all 8 emulator slots are busy", err.getvalue())
+        self.assertIn("outcome=busy all 10 emulator slots are busy", err.getvalue())
         for u in EMU_UNITS:
             state = "deactivating" if u == "c55x-emu-4.service" else "active"
             self.assertIn("%s %s" % (u, state), err.getvalue())
@@ -579,6 +601,58 @@ class MockedLauncherTests(unittest.TestCase):
         self.assertEqual(cm.exception.code, 75)
         self.assertIn("all 2 emulator slots are busy", err.getvalue())
         self.assertNotIn("c55x-emu-2.service", err.getvalue())
+
+    def test_legacy_slots_take_only_slots_0_to_7(self):
+        self.states = dict.fromkeys(LEGACY_UNITS, "active")
+        a = L.Admission()
+        self.assertIsNone(a.acquire(None, legacy=True))
+        self.assertEqual(a.busy, ["%s active" % u for u in LEGACY_UNITS])
+        self.assertEqual(a.acquire(None), "c55x-emu-8.service")
+        a.release()
+        self.states = {}
+        b = L.Admission()
+        self.assertEqual(b.acquire(None, legacy=True), EMU_UNIT)       # lowest slot first
+        b.release()
+
+    def test_legacy_launch_exits_75_while_only_slots_8_and_9_are_free(self):
+        self.states = dict.fromkeys(LEGACY_UNITS, "active")
+        err = io.StringIO()
+        with mock.patch.object(L, "user_bus_env", lambda: ({}, self.tmp)), \
+                mock.patch.object(L, "mem_available", lambda: 64 << 30), \
+                mock.patch.object(L.sys, "stderr", err):
+            with self.assertRaises(SystemExit) as cm:
+                L.main(["--legacy-slots", "--mem", "64M", "--work-dir", str(self.tmp / "w"),
+                        "--", "true"])
+            self.assertEqual(cm.exception.code, 75)
+            self.assertIn("outcome=busy all 8 legacy emulator slots are busy", err.getvalue())
+            self.assertNotIn("c55x-emu-8.service", err.getvalue())
+            self.assertFalse([c for c in self.calls if c[0] == "set-property"])
+            with self.assertRaises(SystemExit) as cm:          # meaningless for work jobs
+                L.main(["--job", "work", "--legacy-slots", "--mem", "64M",
+                        "--work-dir", str(self.tmp / "w"), "--", "true"])
+            self.assertEqual(cm.exception.code, 77)
+            self.assertIn("--legacy-slots applies to emulator jobs only", err.getvalue())
+
+    def test_legacy_launch_runs_in_a_low_slot(self):
+        self.states = dict.fromkeys(LEGACY_UNITS[:7], "active")
+        seen = []
+
+        class FakeProc:
+            def __init__(self, cmd, env=None):
+                seen.append(cmd)
+
+            def wait(self):
+                return 0
+        err = io.StringIO()
+        with mock.patch.object(L, "user_bus_env", lambda: ({}, self.tmp)), \
+                mock.patch.object(L, "mem_available", lambda: 64 << 30), \
+                mock.patch.object(L.subprocess, "Popen", FakeProc), \
+                mock.patch.object(L.sys, "stderr", err):
+            with self.assertRaises(SystemExit) as cm:
+                L.main(["--legacy-slots", "--mem", "64M", "--work-dir", str(self.tmp / "w"),
+                        "--", "true"])
+        self.assertEqual(cm.exception.code, 0, err.getvalue())
+        self.assertIn("--unit=c55x-emu-7.service", seen[0])
 
     def _launch_mocked(self, on_wait, rc, argv=("--mem", "64M")):
         """L.main for one launch whose systemd-run is a fake: on_wait runs
@@ -654,11 +728,14 @@ class MockedLauncherTests(unittest.TestCase):
             self.assertEqual(L.main(["--status"]), 0)
         self.assertEqual([c[0] for c in self.calls if c[0] != "show"], [])
         lines = [l for l in out.getvalue().splitlines() if l.startswith("emulator slot")]
-        self.assertEqual(len(lines), 8)
+        self.assertEqual(len(lines), 10)
         self.assertIn("emulator slot 0: busy c55x-emu.service (active)", lines)
         self.assertIn("emulator slot 1: free c55x-emu-1.service", lines)
         self.assertIn("emulator slot 3: busy c55x-emu-3.service (deactivating)", lines)
         self.assertIn("emulator slot 7: free c55x-emu-7.service", lines)
+        self.assertIn("emulator slot 9: free c55x-emu-9.service", lines)
+        self.assertIn("legacy slots (--legacy-slots, cores built before the ten-slot change): 0..7",
+                      out.getvalue().splitlines())
 
     def test_job_side_verification_execs_only_when_values_match(self):
         import resource
@@ -705,7 +782,8 @@ class MockedLauncherTests(unittest.TestCase):
             ex.assert_called_once_with("payload", ["payload", "arg"])
             ex.reset_mock()
             for other, why in (("c55x-emu-4.service", "is not in c55x.slice/c55x-emu-4.service"),
-                               ("c55x-emu-8.service", "is not an emulator slot unit"),
+                               ("c55x-emu-8.service", "is not in c55x.slice/c55x-emu-8.service"),
+                               ("c55x-emu-10.service", "is not an emulator slot unit"),
                                ("c55x-work-1-abcdef12.service", "is not an emulator slot unit")):
                 with self.assertRaises(SystemExit) as cm:
                     L.inner_verify(inner_args(other, 64 << 20))
