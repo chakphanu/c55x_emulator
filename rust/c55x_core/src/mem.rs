@@ -1,8 +1,5 @@
 //! Data memory and I/O space as the core sees them: MMRs in the state, peripheral and
-//! code-page words through the Python bus, the rest straight in the bus bytearray.
-
-use pyo3::intern;
-use pyo3::prelude::*;
+//! code-page words through the host, the rest straight in the host's memory buffer.
 
 use crate::core::{Core, MEM_BYTES, MMR_END};
 use crate::err::R;
@@ -52,7 +49,7 @@ impl Core {
         if self.is_ata(word) {
             return self.ata_read(word);
         }
-        self.py(|py, _cpu, bus| bus.call_method1(intern!(py, "read"), (word,))?.extract())
+        self.host(|h, ctx| h.read_hooked(ctx, word))
     }
 
     #[cold]
@@ -62,7 +59,7 @@ impl Core {
             return self.ata_write(word, v);
         }
         self.py_writes += 1;
-        self.py(|py, _cpu, bus| { bus.call_method1(intern!(py, "write"), (word, v))?; Ok(()) })
+        self.host(|h, ctx| h.write_hooked(ctx, word, v))
     }
 
     /// Count legal odd long accesses per PC when telemetry is enabled.
@@ -92,7 +89,7 @@ impl Core {
         if let Some(v) = self.dma_read(port).or_else(|| self.mcbsp_read(port)) {
             return Ok(v);
         }
-        self.py(|py, _cpu, bus| bus.call_method1(intern!(py, "port_read"), (port,))?.extract())
+        self.host(|h, ctx| h.port_read(ctx, port))
     }
 
     pub fn port_write(&mut self, port: u32, v: i128) -> R<()> {
@@ -100,6 +97,6 @@ impl Core {
         if self.dma_write(port, v)? || self.mcbsp_write(port, v)? {
             return Ok(());
         }
-        self.py(|py, _cpu, bus| { bus.call_method1(intern!(py, "port_write"), (port, v))?; Ok(()) })
+        self.host(|h, ctx| h.port_write(ctx, port, v))
     }
 }

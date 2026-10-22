@@ -14,12 +14,14 @@ mod err;
 mod expr;
 mod fast;
 mod fuse;
+mod host;
 mod mem;
 mod mcbsp;
 mod parts;
 mod run;
 mod state;
 mod policy;
+mod pyhost;
 mod sync;
 mod timers;
 mod stmt;
@@ -28,8 +30,9 @@ mod stmt;
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict};
 
-use crate::core::{peek_event, Core};
+use crate::core::Core;
 use crate::err::Error;
+use crate::pyhost::{peek_event, PyHost};
 
 pyo3::create_exception!(
     c55x_core, ResourcePolicyError, pyo3::exceptions::PyRuntimeError,
@@ -78,7 +81,10 @@ const MAX_TRACE_LEN: usize = 1 << 22;
 
 fn to_py(py: Python<'_>, e: Error) -> PyErr {
     match e {
-        Error::Py(e) => e,
+        Error::Host(e) => match e.downcast::<PyErr>() {
+            Ok(e) => *e,
+            Err(_) => pyo3::exceptions::PyRuntimeError::new_err("host error"),
+        },
         Error::Emu(msg) | Error::Unsupported(msg) => match py.import("c55x_emu.registers") {
             Ok(m) => match m.getattr("EmulationError").and_then(|c| c.call1((msg,))) {
                 Ok(inst) => PyErr::from_value(inst),
@@ -95,16 +101,25 @@ struct PyCore {
 }
 
 impl PyCore {
+    fn pyhost(&self) -> &PyHost {
+        self.core.host.as_any().downcast_ref().expect("a PyCore always has a PyHost")
+    }
+
+    fn pyhost_mut(&mut self) -> &mut PyHost {
+        self.core.host.as_any_mut().downcast_mut().expect("a PyCore always has a PyHost")
+    }
+
     /// Load the state from the Python Cpu (it is authoritative between calls).
     fn enter<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         // Re-validate containment at execution entries (see REVALIDATE_EVERY):
         // detects a process moved out of the cgroup or limits relaxed after
         // construction.
         guard_entry()?;
+        let cpu = self.pyhost().cpu.bind(py).clone();
+        let hooks = self.pyhost().data_hooks(py)?;
         let c = &mut self.core;
-        let cpu = c.cpu.bind(py).clone();
         c.load(py, &cpu)?;
-        c.load_hooks(py)?;
+        c.set_hooks(hooks);
         c.next_event = peek_event(py, &cpu)?;
         let idle = cpu.getattr("bios_idle")?;
         c.bios_idle = if idle.is_none() { None } else { Some(idle.extract()?) };
@@ -125,11 +140,15 @@ impl PyCore {
     fn new(py: Python<'_>, cpu: &Bound<'_, PyAny>) -> PyResult<Self> {
         // The core refuses to be built outside the managed cgroup.
         guard()?;
-        Ok(PyCore { core: Core::new(py, cpu)? })
+        let (host, mem, code_pages) = PyHost::new(py, cpu)?;
+        Ok(PyCore { core: Core::new(Box::new(host), mem, code_pages) })
     }
 
     fn __traverse__(&self, visit: pyo3::PyVisit<'_>) -> Result<(), pyo3::PyTraverseError> {
-        self.core.visit_py(&visit)
+        match self.core.host.as_any().downcast_ref::<PyHost>() {
+            Some(h) => h.visit(&visit),
+            None => Ok(()),
+        }
     }
 
     /// Cpu.run: until idle (-> True), max_steps, a pc in stop or the cycle limit until.
@@ -165,7 +184,8 @@ impl PyCore {
     /// Attach the ATA disk (ata.py): disk.Disk-like object, its size, IDENTIFY words.
     fn ata_attach(&mut self, disk: Py<PyAny>, sectors: u64, identify: Vec<u16>) -> PyResult<()> {
         if identify.len() != 256 { return Err(pyo3::exceptions::PyValueError::new_err("IDENTIFY: 256 words")); }
-        self.core.ata = Some(Box::new(crate::ata::Ata::new(disk, sectors, identify)));
+        self.pyhost_mut().disk = Some(disk);
+        self.core.ata = Some(Box::new(crate::ata::Ata::new(sectors, identify)));
         Ok(())
     }
 

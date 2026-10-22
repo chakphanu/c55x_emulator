@@ -1,10 +1,6 @@
 //! ATA PIO data path (ata.rs): sector blocks between the disk object and the data
 //! register, and the INTRQ / BSY sequencing per block.
 
-use pyo3::intern;
-use pyo3::prelude::*;
-use pyo3::types::PyBytes;
-
 use crate::ata::{Op, Step, ABRT, BSY, DRDY, DRQ, DSC, ERR, IDNF, SECTOR};
 use crate::core::Core;
 use crate::err::{emu, R};
@@ -95,15 +91,10 @@ impl Core {
     }
 
     fn disk_read(&mut self, lba: u64) -> R<Vec<u8>> {
-        let disk = Python::attach(|py| self.ata().disk.clone_ref(py));
-        self.py(|py, _cpu, _bus| disk.bind(py).call_method1(intern!(py, "read"), (lba,))?.extract::<Vec<u8>>())
+        self.host(|h, ctx| h.disk_read(ctx, lba))
     }
 
     fn disk_write(&mut self, lba: u64, data: &[u8]) -> R<()> {
-        let disk = Python::attach(|py| self.ata().disk.clone_ref(py));
-        self.py(|py, _cpu, _bus| {
-            disk.bind(py).call_method1(intern!(py, "write"), (lba, PyBytes::new(py, data)))?;
-            Ok(())
-        })
+        self.host(|h, ctx| h.disk_write(ctx, lba, data))
     }
 }

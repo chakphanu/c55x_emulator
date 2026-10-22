@@ -2,12 +2,11 @@
 //! there): task file at data words 0x280000..7, alternate status / device control at
 //! 0x280806, INTRQ = CPU interrupt 3 (IFR0 bit 3). The register interface, the PIO data
 //! words and the command timing run here; sectors are read and written through the
-//! Python disk object (disk.Disk.read / write), one call per sector. IDENTIFY data comes
+//! host (Host::disk_read / disk_write; the Python host calls disk.Disk.read / write),
+//! one call per sector. IDENTIFY data comes
 //! from Python (ata.identify). The data path per block is in ata_pio.rs.
 
 use std::collections::{BTreeMap, VecDeque};
-
-use pyo3::prelude::*;
 
 use crate::core::Core;
 use crate::err::R;
@@ -36,7 +35,6 @@ pub(crate) enum Op { Identify, Read { lba: u64, left: u32, multi: bool }, Write 
 pub(crate) enum Step { Identify, ReadBlock, WantBlock(bool), Done, Finish(u8) }
 
 pub struct Ata {
-    pub(crate) disk: Py<PyAny>,
     pub(crate) sectors: u64,
     identify: Vec<u16>,
     regs: [u8; 8],                          // 1 features, 2 count, 3..5 LBA, 6 device
@@ -53,8 +51,8 @@ pub struct Ata {
 }
 
 impl Ata {
-    pub fn new(disk: Py<PyAny>, sectors: u64, identify: Vec<u16>) -> Ata {
-        Ata { disk, sectors, identify, regs: [0; 8], error: 0, status: DRDY | DSC, devctl: 0, multiple: 0,
+    pub fn new(sectors: u64, identify: Vec<u16>) -> Ata {
+        Ata { sectors, identify, regs: [0; 8], error: 0, status: DRDY | DSC, devctl: 0, multiple: 0,
               buf: VecDeque::new(), pending: None, step: None, gen: 0,
               commands: BTreeMap::new(), unknown: BTreeMap::new() }
     }

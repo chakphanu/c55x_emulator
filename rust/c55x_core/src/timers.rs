@@ -3,9 +3,6 @@
 
 use std::cmp::Reverse;
 
-use pyo3::intern;
-use pyo3::prelude::*;
-
 use crate::core::Core;
 use crate::err::{emu, R};
 
@@ -42,11 +39,7 @@ impl Core {
 
     /// (sample rate in Hz, 0 = no clock; CPU MHz) from cpu.audio_clock() (machine.py).
     pub fn audio_clock(&mut self) -> R<(f64, f64)> {
-        let r = self.py(|py, cpu, _bus| {
-            let f = cpu.getattr(intern!(py, "audio_clock"))?;
-            if f.is_none() { return Ok(None); }
-            Ok(Some(f.call0()?.extract::<(f64, f64)>()?))
-        })?;
+        let r = self.host(|h, ctx| h.audio_clock(ctx))?;
         match r {
             Some(v) => Ok(v),
             None => emu("McBSP transmit without an audio clock model (cpu.audio_clock)".into()),

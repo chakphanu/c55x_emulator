@@ -1,23 +1,20 @@
-//! Core: CPU state, memory (the Python bus bytearray), Python callbacks and the compiled
-//! instruction cache. Python stays authoritative between runs: run() loads the state
-//! from the Python Cpu and stores it back. During a run, Python code (peripherals,
-//! events) sees a synchronized view: cycles, pc and IFR before every callback.
+//! Core: CPU state, memory (a byte buffer owned by the host), host callbacks and the
+//! compiled instruction cache. With the Python host, Python stays authoritative between
+//! runs: run() loads the state from the Python Cpu and stores it back. During a run, host
+//! code (peripherals, events) sees a synchronized view: cycles, pc and IFR before every
+//! callback (host.rs).
 
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, VecDeque};
 use std::rc::Rc;
 
-use pyo3::intern;
-use pyo3::prelude::*;
-use pyo3::types::{PyByteArray, PyList};
-
 use crate::ata::{self, Ata};
 use crate::dma::Dma;
 use crate::err::{emu, Error, R};
+use crate::host::{Ctx, Host};
 use crate::icache::{ICache, PcFilter};
 use crate::mcbsp::McBsp;
 use crate::state::State;
-use crate::ast::Ast;
 use crate::stmt::{compile_insn, Insn};
 
 pub const MEM_BYTES: usize = 1 << 24;
@@ -39,12 +36,8 @@ pub struct Compiled {
 pub struct Core {
     pub st: State,
     pub ovf_pending: bool, // overflow detected while reading the current part (SPRU374E 4.27, 4.70.3)
-    pub(crate) mem: *mut u8,
-    _mem_obj: Py<PyByteArray>,
-    pub cpu: Py<PyAny>,
-    bus: Py<PyAny>,
-    code: Py<PyAny>,
-    ir_build: Py<PyAny>,
+    pub(crate) mem: *mut u8,                       // MEM_BYTES, owned by the host, never moved
+    pub host: Box<dyn Host>,
     pub(crate) hooks: Vec<(u32, u32)>,
     pub(crate) hook_lo: u32,                       // lowest hooked word: one compare on the fast path
     pub(crate) code_pages: Vec<bool>,
@@ -69,113 +62,56 @@ pub struct Core {
     pub ata: Option<Box<Ata>>,                          // attached by ata.py
 }
 
-fn cfg<'py>(o: &Bound<'py, PyAny>, name: &str) -> PyResult<Bound<'py, PyAny>> {
-    o.getattr(name)
-}
-
 impl Core {
-    pub fn new(py: Python<'_>, cpu: &Bound<'_, PyAny>) -> PyResult<Core> {
-        let bus = cfg(cpu, "bus")?;
-        let mem_any = cfg(&bus, "mem")?;
-        let mem_obj = mem_any.cast::<PyByteArray>()?.clone();
-        if mem_obj.len() != MEM_BYTES {
-            return Err(pyo3::exceptions::PyValueError::new_err("bus memory size"));
-        }
-        let mem = unsafe { mem_obj.as_bytes_mut().as_mut_ptr() };
-        let code = cfg(cpu, "code")?;
-        let mut code_pages = vec![false; MEM_BYTES >> 8];
-        for p in cfg(&code, "pages")?.try_iter()? {
-            let p: i64 = p?.extract()?;
-            if p >= 0 && (p as usize) < code_pages.len() {
-                code_pages[p as usize] = true;
-            }
-        }
-        let ir_build = py.import("c55x_emu.ir")?.getattr("build")?;
-        Ok(Core {
-            st: State::default(), ovf_pending: false, mem, _mem_obj: mem_obj.unbind(), cpu: cpu.clone().unbind(),
-            bus: bus.unbind(), code: code.unbind(), ir_build: ir_build.unbind(), hooks: Vec::new(), hook_lo: u32::MAX, code_pages,
+    /// A core over host, with mem pointing to MEM_BYTES bytes the host keeps alive and
+    /// never moves, and the pages already holding decoded code.
+    pub fn new(host: Box<dyn Host>, mem: *mut u8, code_pages: Vec<bool>) -> Core {
+        Core {
+            st: State::default(), ovf_pending: false, mem, host, hooks: Vec::new(), hook_lo: u32::MAX, code_pages,
             cache: ICache::new(), next_event: u64::MAX,
             irq_counts: [0; 32], native: 0, compiles: 0, py_writes: 0, py_calls: 0, trace: None, odd_longs: None, bios_idle: None,
             poll_loops: PcFilter::default(), dma: Dma::default(), mcbsp: Default::default(),
             pending_sync: VecDeque::new(), flushing: false, timers: BinaryHeap::new(), audio: Vec::new(), audio_samples: 0, ata: None,
-        })
+        }
     }
 
-    /// Re-read the hooked data ranges (peripherals register after the Cpu exists).
-    pub fn load_hooks(&mut self, py: Python<'_>) -> PyResult<()> {
-        self.hooks.clear();
-        for h in self.bus.bind(py).getattr("data_hooks")?.try_iter()? {
-            let h = h?;
-            self.hooks.push((h.get_item(0)?.extract::<u32>()?, h.get_item(1)?.extract::<u32>()?));
-        }
+    /// The hooked data ranges of the host (peripherals register after the Cpu exists).
+    pub fn set_hooks(&mut self, hooks: Vec<(u32, u32)>) {
+        self.hooks = hooks;
         if self.ata.is_some() {                 // served by ata.rs in the hooked path
             self.hooks.extend([(ata::BASE, ata::BASE + 8), (ata::ALT, ata::ALT + 1)]);
         }
         self.hook_lo = self.hooks.iter().map(|&(lo, _)| lo).min().unwrap_or(u32::MAX);
-        Ok(())
     }
 
-    // ---- Python callbacks --------------------------------------------------------------
-    /// Call into Python with cycles, pc and IFR synchronized; picks up IFR, the next event
-    /// and code invalidations afterwards.
-    /// Report every Python object this core holds a strong reference to, so the
-    /// cycle Cpu -> core -> Cpu can be found and freed by Python's collector.
-    /// A reference missing here would keep its whole cycle alive (a leak of
-    /// about 16 MiB per core).
-    pub fn visit_py(&self, visit: &pyo3::PyVisit<'_>) -> Result<(), pyo3::PyTraverseError> {
-        visit.call(&self.cpu)?;
-        visit.call(&self.bus)?;
-        visit.call(&self.code)?;
-        visit.call(&self.ir_build)?;
-        visit.call(&self._mem_obj)?;
-        if let Some(a) = &self.ata {
-            visit.call(&a.disk)?;
-        }
-        Ok(())
-    }
-
-    pub fn py<T>(&mut self, f: impl FnOnce(Python<'_>, &Bound<'_, PyAny>, &Bound<'_, PyAny>) -> PyResult<T>) -> R<T> {
+    // ---- host callbacks ----------------------------------------------------------------
+    /// Call into the host with cycles, pc and IFR synchronized; picks up IFR, the next
+    /// event and code invalidations afterwards.
+    pub fn host<T>(&mut self, f: impl FnOnce(&mut dyn Host, &mut Ctx) -> R<T>) -> R<T> {
         self.py_calls += 1;
-        Python::attach(|py| {
-            let cpu = self.cpu.bind(py).clone();
-            let bus = self.bus.bind(py).clone();
-            cpu.setattr(intern!(py, "cycles"), self.st.cycles)?;
-            cpu.setattr(intern!(py, "pc"), self.st.pc)?;
-            cpu.setattr(intern!(py, "ifr0"), self.st.ifr0)?;
-            cpu.setattr(intern!(py, "ifr1"), self.st.ifr1)?;
-            let r = f(py, &cpu, &bus);
-            self.st.ifr0 = cpu.getattr(intern!(py, "ifr0"))?.extract()?;
-            self.st.ifr1 = cpu.getattr(intern!(py, "ifr1"))?.extract()?;
-            self.after_python(py, &cpu)?;
-            Ok(r?)
-        })
-    }
-
-    fn after_python(&mut self, py: Python<'_>, cpu: &Bound<'_, PyAny>) -> R<()> {
-        self.next_event = peek_event(py, cpu)?;
-        let dropped = self.code.bind(py).getattr(intern!(py, "dropped"))?;
-        let dropped = dropped.cast::<PyList>().map_err(PyErr::from)?;
-        if !dropped.is_empty() {
-            for p in dropped.iter() {
-                let p: i64 = p.extract()?;
-                if p >= 0 && (p as usize) < self.code_pages.len() {
-                    self.code_pages[p as usize] = false;
-                }
-                if p >= 0 {
-                    self.cache.drop_page(p as u32);
-                }
+        let mut ctx = Ctx { cycles: self.st.cycles, pc: self.st.pc, ifr0: self.st.ifr0, ifr1: self.st.ifr1,
+                            next_event: self.next_event, dropped: Vec::new() };
+        let r = f(&mut *self.host, &mut ctx);
+        self.st.ifr0 = ctx.ifr0;
+        self.st.ifr1 = ctx.ifr1;
+        self.next_event = ctx.next_event;
+        for p in ctx.dropped {
+            if p >= 0 && (p as usize) < self.code_pages.len() {
+                self.code_pages[p as usize] = false;
             }
-            dropped.call_method0(intern!(py, "clear"))?;
+            if p >= 0 {
+                self.cache.drop_page(p as u32);
+            }
         }
-        Ok(())
+        r
     }
 
     pub fn fire_events(&mut self) -> R<()> {
-        self.py(|py, cpu, _bus| { cpu.call_method0(intern!(py, "_fire_events"))?; Ok(()) })
+        self.host(|h, ctx| h.fire_events(ctx))
     }
 
     pub fn clock_stopped(&mut self) -> R<bool> {
-        self.py(|py, cpu, _bus| cpu.getattr(intern!(py, "idle_ctl"))?.call_method0("clock_stopped")?.extract())
+        self.host(|h, ctx| h.clock_stopped(ctx))
     }
 
     // ---- instructions -------------------------------------------------------------------
@@ -187,57 +123,45 @@ impl Core {
         }
     }
 
-    /// Cache miss: decode and compile through ir.py.
+    /// Cache miss: decode through the host and compile.
     #[cold]
     #[inline(never)]
     fn compile_at(&mut self, pc: u32) -> R<Rc<Compiled>> {
         self.compiles += 1;
-        let compiled = Python::attach(|py| -> R<Compiled> {
-            let insn = self.code.bind(py).call_method1(intern!(py, "get"), (pc,))?;
-            if insn.is_none() {
-                return emu(format!("no decoded instruction at 0x{:06x}", pc));
-            }
-            let size: u32 = insn.getattr(intern!(py, "size"))?.extract()?;
-            let text: String = insn.getattr(intern!(py, "text"))?.extract()?;
-            let resolve = self.cpu.bind(py).getattr(intern!(py, "resolve"))?;
-            let body = match self.ir_build.bind(py).call1((&insn, resolve)) {
-                Err(e) => Body::Unsupported(e.to_string()),
-                Ok(ir) => match Ast::from_py(&ir).and_then(|ir| compile_insn(&ir, pc, size)) {
-                    Ok(i) => Body::Native(i),
-                    Err(Error::Unsupported(why)) => Body::Unsupported(why),
-                    Err(e) => return Err(e),
-                },
-            };
-            Ok(Compiled { addr: pc, size, text, body })
-        })?;
+        let Some(d) = self.host.decode(pc)? else {
+            return emu(format!("no decoded instruction at 0x{:06x}", pc));
+        };
+        let body = match d.ir {
+            Err(why) => Body::Unsupported(why),
+            Ok(ir) => match compile_insn(&ir, pc, d.size) {
+                Ok(i) => Body::Native(i),
+                Err(Error::Unsupported(why)) => Body::Unsupported(why),
+                Err(e) => return Err(e),
+            },
+        };
+        let compiled = Compiled { addr: pc, size: d.size, text: d.text, body };
         self.sync_code_pages(pc)?;
         let c = Rc::new(compiled);
         self.cache.insert(pc, c.clone());
         Ok(c)
     }
 
-    /// Mirror CodeCache.pages around pc (a decode adds a window of pages): writes into
-    /// pages holding decoded instructions go through the Python bus, which invalidates.
+    /// Mirror the host's code pages around pc (a decode adds a window of pages): writes
+    /// into pages holding decoded instructions go through the host, which invalidates.
     fn sync_code_pages(&mut self, pc: u32) -> R<()> {
-        Python::attach(|py| -> R<()> {
-            let pages = self.code.bind(py).getattr(intern!(py, "pages"))?;
-            let first = (pc >> 8).saturating_sub(1);
-            for p in first..=(pc >> 8) + WINDOW_PAGES {
-                if (p as usize) < self.code_pages.len() {
-                    self.code_pages[p as usize] = pages.contains(p)?;
-                }
-            }
-            Ok(())
-        })
+        let first = (pc >> 8).saturating_sub(1);
+        let last = ((pc >> 8) + WINDOW_PAGES).min(self.code_pages.len() as u32 - 1);
+        let mut pages = Vec::new();
+        self.host.code_pages_around(first, last, &mut pages)?;
+        for (p, used) in pages {
+            self.code_pages[p as usize] = used;
+        }
+        Ok(())
     }
 
     /// The idle instruction asks the idle configuration (idlectl.py): CPU domain idle?
     pub fn idle_execute(&mut self) -> R<bool> {
-        let r = self.py(|py, cpu, _bus| {
-            let ctl = cpu.getattr(intern!(py, "idle_ctl"))?;
-            if ctl.is_none() { return Ok(None); }
-            Ok(Some(ctl.call_method0("execute")?.extract::<bool>()?))
-        })?;
+        let r = self.host(|h, ctx| h.idle_execute(ctx))?;
         match r { Some(v) => Ok(v), None => emu("idle without an idle control model".into()) }
     }
 
@@ -256,12 +180,4 @@ impl Core {
             Body::Unsupported(why) => emu(format!("0x{:06x}: '{}': {}", c.addr, c.text, why)),
         }
     }
-}
-
-pub fn peek_event(py: Python<'_>, cpu: &Bound<'_, PyAny>) -> PyResult<u64> {
-    let events = cpu.getattr(intern!(py, "events"))?;
-    if events.len()? == 0 {
-        return Ok(u64::MAX);
-    }
-    events.get_item(0)?.get_item(0)?.extract()
 }
