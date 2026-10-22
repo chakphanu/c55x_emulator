@@ -10,7 +10,19 @@ byte-identical to its source).
   --env RUSTC_WRAPPER --env CARGO_BUILD_JOBS -- ./rust/build.sh` ->
   `build/py/c55x_core.so` (with two cargo jobs the linker can hit the job's
   32-task limit: `posix_spawnp: Resource temporarily unavailable`)
-- SHA256 (current reference):
+- SHA256 (current reference): extension
+  3539b077f9f46103aad16e56059de175b5fa2d84851d68b8e36829710cc5bf24 and native
+  runner `build/run/c55x-run`
+  eb9eee5168578870c8bfbe3ac0bd372226cc098f5949f0b0e81ca22353be097d, both built
+  from commit ce124e4 (clean `git archive` export; the runner with
+  `cargo build --release -p c55x_run`, same hash from two target directories).
+  ce124e4 adds the Python-free native host (`NativeHost::from_listing`: memory
+  image + listing rows decoded by the Rust frontend, guard-checked) and the
+  call-script runner `c55x-run`. Acceptance: a private 104-file decode set
+  gives PCM and per-call instruction counts identical to the Python path on
+  every file. The extension's guest behavior is unchanged relative to
+  3ab06717 (full suite per test, 1617 routine vectors, 58,400 fuzz cases).
+- SHA256 of the previous reference:
   3ab06717ed86678cb05dcb33a8a3b5662378e180403f87d1115c7c837d77de09, built from
   commit 65a3b09 (clean `git archive` export, same hash as a separate build).
   It is the first build of the three-crate workspace: dca49fe puts every
