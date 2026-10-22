@@ -350,9 +350,11 @@ fn bin(m: &mut Core, op: Op, a: &Expr, b: &Expr, mask: Option<i64>) -> R<i128> {
         Op::Mul => {
             let x = mac_operand(m, a)?;
             let y = mac_operand(m, b)?;
-            // SPRU374E 4.47.1 / 4.48.2: the 32-bit product is sign extended to 40 bits
+            // SPRU374E 4.47.1 / 4.48.2: the 32-bit product of signed operands is sign
+            // extended to 40 bits; with a uns() operand it stays unsigned (4.27 example)
             // (FRCT 8000h x 8000h with SMUL = 0 is a hardware-validation item)
-            sext(product(m, x, y), 32)
+            let p = product(m, x, y);
+            if meta(a).1 && meta(b).1 { sext(p, 32) } else { p }
         }
     })
 }

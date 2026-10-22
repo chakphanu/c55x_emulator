@@ -206,8 +206,13 @@ fn bin_fx(op: Op, a: &Rc<Expr>, b: &Rc<Expr>, mask: Option<i64>) -> Fx {
         }
         Op::Mul => {
             let (x, y) = (mac_fx(a), mac_fx(b));
-            // expr::bin Op::Mul: the 32-bit product is sign extended (SPRU374E 4.47.1)
-            Box::new(move |m| { let p = x(m)?; let q = y(m)?; Ok(sext(product(m, p, q), 32)) })
+            // expr::bin Op::Mul: the product of signed operands is sign extended
+            // (SPRU374E 4.47.1), a uns() operand keeps it unsigned (4.27 example)
+            if meta(a).1 && meta(b).1 {
+                Box::new(move |m| { let p = x(m)?; let q = y(m)?; Ok(sext(product(m, p, q), 32)) })
+            } else {
+                Box::new(move |m| { let p = x(m)?; let q = y(m)?; Ok(product(m, p, q)) })
+            }
         }
     }
 }

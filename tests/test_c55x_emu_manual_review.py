@@ -152,6 +152,25 @@ class ProductSignTests(unittest.TestCase):
         self.assertEqual(cpu.core.acov(), [0, 0, 0, 0])
 
 
+class UnsignedProductTests(unittest.TestCase):
+    """uns() multiplier operands give an unsigned product that is not sign
+    extended. Values of the SPRU374E 4.27 example AMAR *AR2+ :: MAC uns(*AR1),
+    uns(*CDP), AC0 >> #16: EF00h x A067h = 95C0 2900h, plus AC0 >> 16, overflows
+    bit 31 (M40 = 0, FRCT = 0, SATD = 0). The AMAR-paired form is not accepted
+    by the test machine, so the single MAC with the same operands is used:
+    MACM uns(*AR1), uns(*AR3), AC0 >> #16, written as dis55 -r -g prints it."""
+
+    def test_unsigned_mac_example(self):
+        cpu, bus = machine("XAR1 = mar(*(#01600h))", "XAR3 = mar(*(#01602h))",
+                           "AC0 = (AC0 >> #16) + (uns(*AR1) * uns(*AR3))")
+        bus.write(0x1600, 0xEF00)
+        bus.write(0x1602, 0xA067)
+        cpu.ac[0], cpu.ac[1] = 0x00_6900_0000, 0x00_0023_0000
+        run(cpu)
+        self.assertEqual((cpu.ac[0], cpu.ac[1]), (0x00_95C0_9200, 0x00_0023_0000))
+        self.assertEqual((cpu.core.acov(), cpu.carry), ([1, 0, 0, 0], 0))
+
+
 class StatusFlagTests(unittest.TestCase):
     def test_acov_is_part_of_st0(self):
         # SPRU371F 2.10.1.1: ACOV0 is bit 10 of ST0_55, read/write
