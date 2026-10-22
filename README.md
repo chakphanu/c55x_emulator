@@ -19,8 +19,11 @@ tab shows `Speed: 1.00 x real time`). Other machines are not measured.
 
 Run everything from the repository root; all data paths hang off it (`ZEN_ROOT` overrides).
 
-    rust/build.sh                  # builds build/py/c55x_core.so
+    bin/c55x-contained --job work -- rust/build.sh   # builds build/py/c55x_core.so
     python3 -m unittest discover -s tests -t .
+
+Runs that load the core must go through `bin/c55x-contained` (see
+`CONTAINMENT.md`; agents: `AGENTS.md`).
 
 ## Run the examples
 

@@ -12,8 +12,8 @@ kernel-enforced cgroup and the native core refuses to run outside it.
     bin/c55x-contained --status
 
 Options, exit codes and the do/do-not list are in
-`.claude/skills/c55x-contained/SKILL.md`. Build a new core without touching the
-pinned one:
+`.claude/skills/c55x-contained/SKILL.md`. `build/py/c55x_core.so` is the guarded
+reference core (`ORACLE_V2.md`). To try a new core build without touching it:
 
     CARGO_TARGET_DIR=$PWD/build/candidate-rust cargo build --release \
         --manifest-path rust/c55x_core/Cargo.toml

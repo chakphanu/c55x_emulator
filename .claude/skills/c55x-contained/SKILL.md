@@ -5,7 +5,7 @@ description: Use BEFORE running anything that loads the C55x emulator core (pyth
 
 # Running the emulator under resource containment
 
-Full reference: `CONTAINMENT.md`. This page is the short operational version.
+Full reference: `CONTAINMENT.md`. Agents that read `AGENTS.md` get the same rules there. This page is the short operational version.
 
 ## The one rule
 
@@ -97,8 +97,9 @@ outcome prints one line on stderr starting with `c55x-contained: outcome=`.
 - Stop, kill or `reset-failed` another job's unit, or delete its lock.
 - Point `--work-dir`, `TMPDIR` or build outputs at `/tmp`, `/dev/shm` or any
   other tmpfs.
-- Replace the pinned core `build/py/c55x_core.so`. A new core build goes to
-  its own output directory (`CARGO_TARGET_DIR=build/candidate-rust cargo
+- Replace the reference core `build/py/c55x_core.so` (the guarded build listed in
+  `ORACLE_V2.md`), or use `build/afce/` (the older build without the guard, kept for
+  regression comparison only). A new core build goes to its own output directory (`CARGO_TARGET_DIR=build/candidate-rust cargo
   build --release ...`, then use it with `ZEN_CORE_DIR=<dir>`). Moving
   downstream pins to a new core needs explicit owner confirmation.
 

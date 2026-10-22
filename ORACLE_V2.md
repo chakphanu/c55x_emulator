@@ -5,8 +5,15 @@ oracle. The reference build it replaces is the `3dbef971e814e1e7...`
 core (SQDST-corrected snapshot; this repository's `8871bc9` is
 byte-identical to its source).
 
-- Build: `./rust/build.sh` -> `build/py/c55x_core.so`
-- SHA256: afcebfd440af00d594e6b7ada8494d174946fafd16681c26bc2cd620e0ef639c
+- Build: `bin/c55x-contained --job work -- ./rust/build.sh` -> `build/py/c55x_core.so`
+- SHA256 (reference, with resource containment): 24f97bac9828549532600301ddd03962d2a714a72b2a1ef2326f3c7543b7ed53
+  (built from commit 1deaa42; a second build in another directory gives the same hash)
+- SHA256 of the earlier oracle v2 build without the containment guard:
+  afcebfd440af00d594e6b7ada8494d174946fafd16681c26bc2cd620e0ef639c (commit 34fd281)
+- The guard and the leak fix change the binary but not the guest behavior: 1617
+  differential vectors compared between the two builds show zero differences in
+  status, instruction count, cycles, registers, memory windows, outside writes,
+  trace pcs and ACOV flags.
 - Baseline for the semantic list below: `3dbef971e814e1e7...`
 - Test suite: 143 tests (only the two pre-existing example-artifact
   errors remain), plus a 1617-vector differential regression across five
