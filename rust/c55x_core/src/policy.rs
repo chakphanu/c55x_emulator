@@ -34,9 +34,9 @@ const GIB: u64 = 1 << 30;
 const JOB_MEM_MAX: u64 = 2 * GIB;
 const JOB_PIDS_MAX: u64 = 32;
 const JOB_CPU_RATIO_MAX: f64 = 1.0;
-const SLICE_MEM_MAX: u64 = 10 * GIB;
-const SLICE_MEM_HIGH: u64 = 9 * GIB;
-const SLICE_PIDS_MAX: u64 = 320;
+const SLICE_MEM_MAX: u64 = 18 * GIB;
+const SLICE_MEM_HIGH: u64 = 17 * GIB;
+const SLICE_PIDS_MAX: u64 = 448;
 const SLICE_CPU_RATIO_MAX: f64 = 10.0;
 const RLIMIT_CPU_MAX: u64 = 600;
 const RLIMIT_NOFILE_MAX: u64 = 512;
@@ -329,10 +329,10 @@ Max address space         2147483648           2147483648           bytes     \n
             let slice = self.dir(&format!("/user.slice/{}", SLICE_NAME));
             let job = self.dir(&self.job_rel);
             fs::create_dir_all(&job).unwrap();
-            put(&slice, "memory.max", &(10 * GIB).to_string());
-            put(&slice, "memory.high", &(9 * GIB).to_string());
+            put(&slice, "memory.max", &(18 * GIB).to_string());
+            put(&slice, "memory.high", &(17 * GIB).to_string());
             put(&slice, "memory.swap.max", "0");
-            put(&slice, "pids.max", "320");
+            put(&slice, "pids.max", "448");
             put(&slice, "cpu.max", "1000000 100000");
             put(&job, "memory.max", &GIB.to_string());
             put(&job, "memory.swap.max", "0");
@@ -429,15 +429,15 @@ Max address space         2147483648           2147483648           bytes     \n
         let f = Fake::new();
         // write_good puts every shared value exactly at its cap
         assert_eq!(f.check(), Ok(()));
-        put(&f.slice(), "memory.max", &(10 * GIB + 1).to_string());
+        put(&f.slice(), "memory.max", &(18 * GIB + 1).to_string());
         f.expect_refused("shared memory.max");
-        put(&f.slice(), "memory.max", &(10 * GIB).to_string());
-        put(&f.slice(), "memory.high", &(9 * GIB + 1).to_string());
+        put(&f.slice(), "memory.max", &(18 * GIB).to_string());
+        put(&f.slice(), "memory.high", &(17 * GIB + 1).to_string());
         f.expect_refused("shared memory.high");
-        put(&f.slice(), "memory.high", &(9 * GIB).to_string());
-        put(&f.slice(), "pids.max", "321");
+        put(&f.slice(), "memory.high", &(17 * GIB).to_string());
+        put(&f.slice(), "pids.max", "449");
         f.expect_refused("shared pids.max");
-        put(&f.slice(), "pids.max", "320");
+        put(&f.slice(), "pids.max", "448");
         put(&f.slice(), "cpu.max", "1000001 100000");
         f.expect_refused("shared cpu.max");
         put(&f.slice(), "cpu.max", "1000000 100000");
@@ -460,12 +460,12 @@ Max address space         2147483648           2147483648           bytes     \n
     #[test] fn relaxed_shared_ancestor_is_refused() {
         let f = Fake::new();
         put(&f.slice(), "memory.max", "max"); f.expect_refused("unlimited");
-        put(&f.slice(), "memory.max", &(16 * GIB).to_string()); f.expect_refused("outside");
-        put(&f.slice(), "memory.max", &(10 * GIB).to_string());
+        put(&f.slice(), "memory.max", &(32 * GIB).to_string()); f.expect_refused("outside");
+        put(&f.slice(), "memory.max", &(18 * GIB).to_string());
         put(&f.slice(), "memory.high", "max"); f.expect_refused("unlimited");
-        put(&f.slice(), "memory.high", &(9 * GIB).to_string());
+        put(&f.slice(), "memory.high", &(17 * GIB).to_string());
         put(&f.slice(), "pids.max", "max"); f.expect_refused("unlimited");
-        put(&f.slice(), "pids.max", "320");
+        put(&f.slice(), "pids.max", "448");
         put(&f.slice(), "cpu.max", "2000000 100000"); f.expect_refused("exceeds");
         put(&f.slice(), "cpu.max", "max 100000"); f.expect_refused("unlimited");
     }
@@ -479,7 +479,7 @@ Max address space         2147483648           2147483648           bytes     \n
     }
     #[test] fn shared_memory_high_must_be_finite_and_bounded() {
         let f = Fake::new();
-        put(&f.slice(), "memory.high", &(10 * GIB).to_string());
+        put(&f.slice(), "memory.high", &(18 * GIB).to_string());
         f.expect_refused("shared memory.high");
         put(&f.slice(), "memory.high", "0");
         f.expect_refused("shared memory.high");
