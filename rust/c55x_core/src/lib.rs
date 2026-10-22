@@ -87,6 +87,10 @@ impl PyCore {
         Ok(PyCore { core: Core::new(py, cpu)? })
     }
 
+    fn __traverse__(&self, visit: pyo3::PyVisit<'_>) -> Result<(), pyo3::PyTraverseError> {
+        self.core.visit_py(&visit)
+    }
+
     /// Cpu.run: until idle (-> True), max_steps, a pc in stop or the cycle limit until.
     #[pyo3(signature = (max_steps, stop, until=None))]
     fn run(&mut self, py: Python<'_>, max_steps: u64, stop: crate::icache::PcSet, until: Option<u64>) -> PyResult<bool> {

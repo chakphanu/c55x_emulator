@@ -116,6 +116,22 @@ impl Core {
     // ---- Python callbacks --------------------------------------------------------------
     /// Call into Python with cycles, pc and IFR synchronized; picks up IFR, the next event
     /// and code invalidations afterwards.
+    /// Report every Python object this core holds a strong reference to, so the
+    /// cycle Cpu -> core -> Cpu can be found and freed by Python's collector.
+    /// A reference missing here would keep its whole cycle alive (a leak of
+    /// about 16 MiB per core).
+    pub fn visit_py(&self, visit: &pyo3::PyVisit<'_>) -> Result<(), pyo3::PyTraverseError> {
+        visit.call(&self.cpu)?;
+        visit.call(&self.bus)?;
+        visit.call(&self.code)?;
+        visit.call(&self.ir_build)?;
+        visit.call(&self._mem_obj)?;
+        if let Some(a) = &self.ata {
+            visit.call(&a.disk)?;
+        }
+        Ok(())
+    }
+
     pub fn py<T>(&mut self, f: impl FnOnce(Python<'_>, &Bound<'_, PyAny>, &Bound<'_, PyAny>) -> PyResult<T>) -> R<T> {
         self.py_calls += 1;
         Python::attach(|py| {
