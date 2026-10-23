@@ -12,7 +12,19 @@ byte-identical to its source).
   `build/run/c55x-run` (before the binding was removed: `build/py/c55x_core.so`;
   with two cargo jobs the linker can hit the job's
   32-task limit: `posix_spawnp: Resource temporarily unavailable`)
-- SHA256 (current reference): native runner `build/run/c55x-run`
+- SHA256 (current reference, owner-confirmed 2026-10-23): native runner
+  6d51220d27eacbec2602aa1225e900d1f78774d00a1572f0b26af10d5ca02082, built with
+  `rust/build.sh` from commit 8232afb (clean `git archive` export; the same hash
+  as the candidate build tested before the commit). Relative to 515dc807 it adds
+  the opt-in call observers (`notes/observers.md`) and XCCPART with any
+  one-assignment pointer partner (`CHANGELOG.md`, 2026-10-23). Acceptance: the
+  private 104-file decode set unchanged (PCM, and instructions, cycles and
+  status of every call); 1267 recorded routine runs of 515dc807 identical with
+  observers off and with all three observers on, except the one run that
+  stopped at the newly supported partner form; all Rust tests under the
+  launcher (220 passed, 2 ignored that run outside a job). Until downstream
+  users switch, `build/run/c55x-run` may still hold 515dc807; check the hash.
+- SHA256 of the previous reference: native runner `build/run/c55x-run`
   515dc807497bf4b67614e8b9cc6edfa0a04acc97e3996ea47f0779715b3d4366, built with
   `rust/build.sh` from commit 4472eeb (clean `git archive` export; the same
   hash as the build gated on fa57962, whose source is identical). It is the

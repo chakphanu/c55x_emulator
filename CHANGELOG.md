@@ -18,6 +18,32 @@ guide. Instruction spellings in the tests were checked by assembling them with
 `asm55` and reading them back with `dis55 -r -g`. Citations give section numbers
 only.
 
+## 2026-10-23: call observers and XCCPART with a reading partner
+
+1. **XCCPART with any one-assignment pointer partner** (8232afb): `if (cond)
+   execute(D_Unit) || P` with a pointer-modifying partner P was compiled only
+   when P stored a register or constant to one Smem word; a partner reading
+   its Smem (for example `T1 = *AR0- - AR2`, SUB src, Smem, dst) stopped with
+   "unsupported". Now a false condition evaluates the partner's operand
+   addresses once each (sources, then destination): the post-modifications
+   happen, nothing is read or written, the destination, CARRY and ACOV stay.
+   A true condition runs the normal assignment. Still refused: several parts,
+   non-assignment parts, a read-modify-write of one operand. SPRU374E 4.28.2
+   (XCCPART: the address phase always runs), 4.80.5 (TAx destination: 16-bit
+   A-unit, overflow at bit 15, SATA). Evidence: text. Tests:
+   `rust/c55x_core/tests/manual_review.rs` (`source_operand_partner*`).
+2. **Opt-in observers in c55x-run** (8774bc4): `write_events`, `pc_states`
+   and `entry_snapshots` in a call's `observe` object (`notes/observers.md`).
+   No guest behavior change: off by default, and an observed call gives the
+   same values, flags, cycles and instruction counts as the same call
+   unobserved (asserted by every test in `rust/c55x_run/tests/observe.rs`).
+
+Gates: the private 104-file decode set (PCM, and instructions, cycles and status
+of all 450,376 calls) identical to 515dc807; 1267 recorded routine runs of
+515dc807 rerun with observers off and with all three observers on every call:
+identical except the one run that stopped at the partner form of item 1, which
+now returns; Rust tests 220 passed, 2 ignored (outside a job).
+
 ## 2026-10-23: a pure C55x emulator without Python
 
 No guest behavior change.
@@ -192,6 +218,13 @@ dual 16-bit arithmetic, RPTCC, XCCPART and SQDST from SPRU374E 4.9, 4.26, 4.61,
   it.
 - A10: CSR after an RPTCC loop that ends early: SPRU374E 4.61 gives 3,
   SWPU067E gives 4 for the same case; the core follows SWPU067E.
+- A11: ADD K16, Smem on a memory-mapped register through `mmap()` (for example
+  `@SP_L = @SP_L - #k || mmap()`): the core builds the ADD K16, Smem part only
+  for an ordinary Smem word, so with `mmap()` it runs a plain assignment: the
+  16-bit sum is stored, with no ACOV0, no CARRY and no SATD saturation.
+  SPRU374E 4.7.16 (ACOV0 and CARRY at bit 31, SATD saturation) and 4.40
+  (`mmap()` only redirects the address) give no exception for MMRs. Not
+  changed; hardware or the TI simulator should decide.
 - Silicon erratum CPU_89 (assembler remark R5673), unchanged: an overflowing
   M40 = 0, SXMD = 0 shift-left may not saturate correctly on silicon.
 
