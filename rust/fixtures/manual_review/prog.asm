@@ -384,3 +384,10 @@ t_sqdst:
 	sqdst(*AR0,*AR1,AC0,AC1)
 e_sqdst:
 	goto e_sqdst
+
+; XCCPART with a pointer partner that reads its Smem (SUB src, Smem, dst into T1); the
+; tests set TC1, AR0, AR2, ST3 and the memory word
+t_xcc_sub:
+	if (TC1) execute(D_Unit) || T1 = *AR0- - AR2
+e_xcc_sub:
+	goto e_xcc_sub

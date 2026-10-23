@@ -60,7 +60,7 @@ pub struct Insn {
     ptr_mod: bool,               // a data part modifies a pointer (D_Unit skip, ir.py)
     address_parts: Vec<usize>,   // indices of the mar() parts
     skip_eas: Vec<Ea>,           // with ptr_mod: data operand addresses for a D_Unit skip
-    conditional_store_address: Option<Ea>,
+    conditional_eas: Vec<Ea>,    // XCCPART pointer partner: its operand addresses in access order
     addr: u32,
     nxt: u32,
 }
@@ -80,7 +80,8 @@ pub fn compile_insn(ir: &Ast, pc: u32, size: u32) -> R<Insn> {
     let v = |n: &Ast| node(n, false, io, mmap);
     let mut parts = Vec::new();
     let mut eas = Vec::new();            // per part: memory operand addresses (part_eas)
-    let mut conditional_store_address = None;
+    let mut conditional_eas = Vec::new();
+    let mut conditional_rmw = false;
     for p in item(ir, 4)?.try_iter()? {
         let first: bool = item(&p, 0)?.extract()?;
         let d = item(&p, 1)?;
@@ -126,12 +127,12 @@ pub fn compile_insn(ir: &Ast, pc: u32, size: u32) -> R<Insn> {
                 let lhs = dst(node(item(&d, 1)?, false, io_w, mmap)?)?;
                 let rhs = node(item(&d, 2)?, false, io_r, mmap)?;
                 indirect_eas(&rhs, &mut operands);
+                let reads = operands.len();
                 indirect_eas(&lhs, &mut operands);
-                if let Expr::Mem { ea, words: 1, port: false, .. } = &lhs {
-                    if matches!(&rhs, Expr::Reg(..) | Expr::Num(_)) {
-                        conditional_store_address = Some(*ea);
-                    }
-                }
+                // XCCPART (SPRU374E 4.28.2): a false condition keeps the address phase,
+                // the operand addresses read then written, each evaluated once
+                conditional_rmw = operands[reads..].iter().any(|w| operands[..reads].contains(w));
+                conditional_eas = operands.clone();
                 if let (Expr::Reg(dst, _), Expr::MinMax(source, old, max)) = (&lhs, &rhs) {
                     if let Expr::Reg(old_dst, _) = old.as_ref() {
                         if dst == old_dst {
@@ -199,9 +200,11 @@ pub fn compile_insn(ir: &Ast, pc: u32, size: u32) -> R<Insn> {
         Some((node(item(&c, 0)?, false, false, false)?, item(&c, 1)?.extract()?))
     };
     if matches!(cond, Some((_, 3))) && (parts.len() != 1
-        || conditional_store_address.is_none()
-        || !matches!(parts[0].1, Part::Assign(_))) {
-        return unsupported("XCCPART pointer partner other than one Smem store from a register/constant");
+        || !matches!(parts[0].1, Part::Assign(_))
+        || conditional_eas.is_empty()
+        || conditional_rmw) {
+        return unsupported("XCCPART pointer partner other than one assignment with pointer operands \
+                            (no read-modify-write of one operand)");
     }
     let r = item(ir, 7)?;
     let mut repeat_condition = None;
@@ -226,7 +229,7 @@ pub fn compile_insn(ir: &Ast, pc: u32, size: u32) -> R<Insn> {
         }).collect()));
     }
     Ok(Insn { parts, flow, cond, repeat, repeat_condition, fused, ptr_mod, address_parts, skip_eas,
-              conditional_store_address, addr: pc, nxt: pc + size })
+              conditional_eas, addr: pc, nxt: pc + size })
 }
 
 /// The memory operand addresses of a part, in access order (an assignment's are taken
@@ -277,9 +280,10 @@ pub fn exec(m: &mut Core, i: &Insn) -> R<Option<u32>> {
             if condition(m, c)? {
                 exec_body(m, i, true)
             } else {
-                // SWPU067E XCCPART: suppress the memory write, retain DAGEN.
-                // This case is compiled only for the bounded single-store form.
-                if let Some(ea) = i.conditional_store_address { ea.eval(m)?; }
+                // SWPU067E XCCPART: suppress the data operation, retain DAGEN: the partner's
+                // operand addresses are generated (post-modifications), nothing is read or
+                // written. Compiled only for one assignment (compile_insn).
+                for ea in &i.conditional_eas { ea.eval(m)?; }
                 Ok(None)
             }
         }

@@ -221,4 +221,6 @@
 0202da: ec319e001601     XAR1 = mar(*(#01601h))
 0202e0: 860081e0         sqdst(*AR0,*AR1,AC0,AC1)
 0202e4: 4a7e             goto #0x0202e4
-0202e6: 20               nop
+0202e6: d8055a_9ee4      if (TC1) execute(D_Unit) || T1 = *AR0- - AR2
+0202eb: 4a7e             goto #0x0202eb
+0202ed: 20               nop

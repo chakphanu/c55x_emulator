@@ -545,6 +545,51 @@ mod execute_conditionally {
         }
     }
 
+    /// `if (TC1) execute(D_Unit) || T1 = *AR0- - AR2`: XCCPART (4.28.2) with SUB src, Smem,
+    /// dst (4.80.5, pipeline X; a TAx destination is a 16-bit A-unit result, overflow at
+    /// bit 15, saturated per SATA). True: the subtraction reads the word AR0 points to, then
+    /// AR0 decrements. False: only the address phase runs, AR0 still decrements, T1, CARRY
+    /// and ACOV stay.
+    fn xcc_sub(tc1: u32, xar0: u32, ar2: u32, word: u32, sata: bool) -> Core {
+        let mut cpu = machine("xcc_sub");
+        write(&mut cpu, xar0, word);
+        cpu.st.xar[0] = xar0;
+        cpu.st.xar[2] = ar2;
+        cpu.st.t[1] = 0x1111;
+        cpu.st.tc1 = tc1;
+        cpu.st.carry = 1;
+        if sata { cpu.st.st3 |= 1 << 5 }
+        run(&mut cpu);
+        cpu
+    }
+
+    #[test]
+    fn source_operand_partner() {
+        let cpu = xcc_sub(1, 0x1600, 0x0003, 0x0010, false);
+        assert_eq!((cpu.st.t[1], cpu.st.xar[0]), (0x000D, 0x15FF));
+        let cpu = xcc_sub(0, 0x1600, 0x0003, 0x0010, false);
+        assert_eq!((cpu.st.t[1], cpu.st.xar[0], cpu.st.carry, cpu.st.acov), (0x1111, 0x15FF, 1, [0, 0, 0, 0]));
+    }
+
+    #[test]
+    fn source_operand_partner_overflow_follows_sata() {
+        // 8000h - 1 overflows at bit 15: SATA = 1 saturates to 8000h, SATA = 0 keeps 7FFFh
+        assert_eq!(xcc_sub(1, 0x1600, 0x0001, 0x8000, true).st.t[1], 0x8000);
+        assert_eq!(xcc_sub(1, 0x1600, 0x0001, 0x8000, false).st.t[1], 0x7FFF);
+        let cpu = xcc_sub(0, 0x1600, 0x0001, 0x8000, true);
+        assert_eq!((cpu.st.t[1], cpu.st.xar[0]), (0x1111, 0x15FF));
+    }
+
+    #[test]
+    fn source_operand_partner_wraps_inside_the_data_page() {
+        // linear post-decrement of AR0 = 0: AR0 wraps to FFFFh, the page bits of XAR0 stay,
+        // whether the condition is true or false (ST2 = ARMS only: no circular buffer)
+        for (tc1, t1) in [(1, 0x0004), (0, 0x1111)] {
+            let cpu = xcc_sub(tc1, 0x02_0000, 0x0001, 0x0005, false);
+            assert_eq!((cpu.st.t[1], cpu.st.xar[0]), (t1, 0x02_FFFF), "TC1 = {}", tc1);
+        }
+    }
+
     #[test]
     fn parallel_store_keeps_the_pointer_update() {
         for (name, word) in [("xcc_store_tc1_0", 0x0000), ("xcc_store_tc1_1", 0x0009)] {

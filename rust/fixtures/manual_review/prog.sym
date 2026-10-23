@@ -104,5 +104,7 @@ t_xcc_store_tc1_1 0x0202c4
 e_xcc_store_tc1_1 0x0202d2
 t_sqdst 0x0202d4
 e_sqdst 0x0202e4
-___etext__ 0x0202e7
-etext 0x0202e7
+t_xcc_sub 0x0202e6
+e_xcc_sub 0x0202eb
+___etext__ 0x0202ee
+etext 0x0202ee
