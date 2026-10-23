@@ -244,7 +244,14 @@ fn part_eas(p: &Part, out: &mut Vec<Ea>) {
 }
 
 fn truth(m: &mut Core, c: &Option<Expr>) -> R<bool> {
-    match c { None => Ok(true), Some(e) => Ok(get(m, e)? != 0) }
+    match c { None => Ok(true), Some(e) => condition(m, e) }
+}
+
+/// A condition of the current instruction (reported to an observer, observe.rs).
+fn condition(m: &mut Core, c: &Expr) -> R<bool> {
+    let v = get(m, c)? != 0;
+    m.observe_condition(v);
+    Ok(v)
 }
 
 pub fn exec(m: &mut Core, i: &Insn) -> R<Option<u32>> {
@@ -255,19 +262,19 @@ pub fn exec(m: &mut Core, i: &Insn) -> R<Option<u32>> {
     }
     match &i.cond {
         Some((c, 1)) => {                   // the condition is for the next instruction
-            let skip = get(m, c)? == 0;
+            let skip = !condition(m, c)?;
             let r = exec_body(m, i, true)?;
             m.st.skip_next = skip;
             Ok(r)
         }
         Some((c, 2)) => {                   // ... for the data operations of the next one
-            let skip = get(m, c)? == 0;
+            let skip = !condition(m, c)?;
             let r = exec_body(m, i, true)?;
             m.st.skip_data_next = skip;
             Ok(r)
         }
         Some((c, 3)) => {
-            if get(m, c)? != 0 {
+            if condition(m, c)? {
                 exec_body(m, i, true)
             } else {
                 // SWPU067E XCCPART: suppress the memory write, retain DAGEN.
@@ -276,7 +283,7 @@ pub fn exec(m: &mut Core, i: &Insn) -> R<Option<u32>> {
                 Ok(None)
             }
         }
-        Some((c, _)) => { let data = get(m, c)? != 0; exec_body(m, i, data) }
+        Some((c, _)) => { let data = condition(m, c)?; exec_body(m, i, data) }
         None => exec_body(m, i, true),
     }
 }
@@ -326,7 +333,13 @@ fn exec_body(m: &mut Core, i: &Insn, data: bool) -> R<Option<u32>> {
                     break;
                 }
             }
+            let observed = if m.obs.is_some() {
+                m.observe_before(body.addr, Some(step), crate::observe::ExecMode::Execute)
+            } else { None };
             m.exec_compiled(&body)?;
+            if let Some(k) = observed {
+                m.observe_after(k);
+            }
             // Trace the body execution with the same ring semantics as the
             // fetch loop (run.rs): diagnostic only, no value or cycle change.
             if let Some((max, t)) = &mut m.trace {
@@ -334,6 +347,10 @@ fn exec_body(m: &mut Core, i: &Insn, data: bool) -> R<Option<u32>> {
                 t.push_back(body.addr);
             }
             executed += 1;
+        }
+        if m.obs.is_some() {
+            m.observe_restore(crate::observe::Context { origin: crate::observe::Origin::Insn,
+                                                        pc: Some(i.addr), iteration: None });
         }
         // SPRU374E 4.61 example: RPTC reads 0000 after a completed loop
         if i.repeat_condition.is_some() && executed == n + 1 {

@@ -236,7 +236,11 @@ impl Core {
         }
         c.status |= flags & c.regs[CICR];
         let irq = flags & c.regs[CICR] & (HALF | FRAME | LAST | BLOCK) != 0;
+        let prev = if self.obs.is_some() { Some(self.observe_origin(crate::observe::Origin::Peripheral, None)) } else { None };
         if (csdp >> 9) & 0xF == PORT_IO { self.port_write(dst >> 1, value as i128)?; } else { self.write(dst >> 1, value as i128)?; }
+        if let Some(c) = prev {
+            self.observe_restore(c);
+        }
         if irq {
             self.raise_irq(IRQS[n]);
         }

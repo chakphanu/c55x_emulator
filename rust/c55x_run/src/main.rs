@@ -9,6 +9,7 @@
 //!
 //! Usage: c55x-run --script S.json [--input FILE] --out DIR (no --input: script without records)
 
+mod obs;
 mod state;
 
 use std::collections::HashMap;
@@ -181,6 +182,7 @@ impl Runner {
             }
         }
         self.core.set_trace(trace).map_err(|e| ("ValueError".to_string(), core_error(e).1))?;
+        self.core.obs = obs::observer(observe, &self.core).map_err(|m| ("ValueError".to_string(), m))?;
         let (native0, cycles0) = (self.core.native, self.core.st.cycles);
         let start = Instant::now();
         let mut budget = 0u64;
@@ -229,6 +231,9 @@ impl Runner {
         }
         if let Some(n) = mark {
             observed.insert("memory_diff".into(), json!(memory_diff(&self.marks[n], self.core.memory())));
+        }
+        if let Some(o) = self.core.obs.take() {
+            obs::report(*o, native0, &mut observed);
         }
         self.calls.push(Call { name: label.into(), instructions: self.core.native - native0,
                                cycles: self.core.st.cycles - cycles0, status, observed });

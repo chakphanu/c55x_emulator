@@ -66,6 +66,7 @@ pub struct Core {
     pub compiles: u64,
     pub trace: Option<(usize, std::collections::VecDeque<u32>)>, // (max length, executed pcs)
     pub odd_longs: Option<std::collections::BTreeMap<u32, u64>>, // pc -> long accesses at odd addresses
+    pub obs: Option<Box<crate::observe::Observer>>,      // opt-in observation (observe.rs), None: off
     pub dma: Dma,
     pub mcbsp: [McBsp; 2],
     pub pending_sync: VecDeque<u32>,
@@ -122,7 +123,7 @@ impl Core {
         Ok(Core {
             st: State::default(), ovf_pending: false, mem: mem.as_mut_ptr(), _buf: mem, decoded, code_pages,
             cache: ICache::new(), audio_clock: None, unmodeled_ports: 0, code_page_writes: 0,
-            irq_counts: [0; 32], native: 0, compiles: 0, trace: None, odd_longs: None,
+            irq_counts: [0; 32], native: 0, compiles: 0, trace: None, odd_longs: None, obs: None,
             dma: Dma::default(), mcbsp: Default::default(),
             pending_sync: VecDeque::new(), flushing: false, timers: BinaryHeap::new(), audio: Vec::new(), audio_samples: 0,
         })

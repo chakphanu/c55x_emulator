@@ -66,7 +66,7 @@ pub fn reg_by_name(name: &str) -> Option<Reg> {
     })
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct State {
     pub ac: [u64; 4],
     pub t: [u32; 4],

@@ -4,6 +4,7 @@
 
 use crate::core::Core;
 use crate::err::{emu, Error, R};
+use crate::observe::{ExecMode, Origin};
 use crate::state::ST1_INTM;
 
 const PRIORITY: [u32; 25] = [24, 2, 16, 3, 4, 5, 17, 6, 7, 8, 18, 9, 10, 11, 19, 12, 13, 20, 21, 14, 15, 22, 23, 25, 26];
@@ -103,7 +104,13 @@ impl Core {
     /// Execution entry: enter target like a call instruction returning to ret (-> target).
     pub fn call(&mut self, target: u32, ret: u32) -> R<u32> {
         entry_guard()?;
-        self.call_insn(target, ret)
+        if self.obs.is_none() {
+            return self.call_insn(target, ret);
+        }
+        let prev = self.observe_origin(Origin::CallEntry, None);
+        let r = self.call_insn(target, ret);
+        self.observe_restore(prev);
+        r
     }
 
     /// Execution entry: return like a return instruction (-> the return address).
@@ -117,6 +124,9 @@ impl Core {
         self.sys_push(((self.st.cfct << 8) | (self.st.reta >> 16)) as i128)?;
         self.st.reta = ret;
         self.st.cfct = self.loop_save()?;
+        if self.obs.is_some() {
+            self.observe_call(target);
+        }
         Ok(target)
     }
 
@@ -162,6 +172,7 @@ impl Core {
             self.st.pc += idle.size;
         }
         if n < 16 { self.st.ifr0 &= !(1 << n) } else { self.st.ifr1 &= !(1 << (n - 16)) }
+        let prev = if self.obs.is_some() { Some(self.observe_origin(Origin::Interrupt, None)) } else { None };
         let st0 = self.st.mmr(ST0, None)?;
         self.sys_push(st0 as i128)?;
         self.push(self.st.st2 as i128)?;
@@ -183,7 +194,13 @@ impl Core {
             if insn.size != 4 {
                 return emu(format!("vector {}: bytes 4..7 hold a {}-byte instruction", n, insn.size));
             }
+            if prev.is_some() {
+                self.observe_origin(Origin::Interrupt, Some(v + 4));
+            }
             self.exec_compiled(&insn)?;
+        }
+        if let Some(c) = prev {
+            self.observe_restore(c);
         }
         Ok(())
     }
@@ -204,6 +221,11 @@ impl Core {
             if t.len() == *max { t.pop_front(); }
             t.push_back(self.st.pc);
         }
+        let observed = if self.obs.is_some() {
+            let mode = if self.st.skip_next { ExecMode::Skipped }
+                else if self.st.skip_data_next { ExecMode::AddressPhase } else { ExecMode::Execute };
+            self.observe_before(self.st.pc, None, mode)
+        } else { None };
         let insn = self.fetch(self.st.pc)?;
         let nxt = self.st.pc + insn.size;
         let new_pc = if self.st.skip_next {
@@ -218,6 +240,9 @@ impl Core {
             self.native += 1;
             self.exec_compiled(&insn)?
         };
+        if let Some(k) = observed {
+            self.observe_after(k);
+        }
         self.st.cycles += 1;
         if self.st.cycles >= self.next_timer() {
             self.fire_due()?;

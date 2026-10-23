@@ -44,16 +44,26 @@ impl Core {
         let word = word & 0x7FFFFF;
         let v = (value & 0xFFFF) as u32;
         if word < MMR_END {
-            self.st.mmr(word, Some(v))?;
+            let r = self.st.mmr(word, Some(v));
+            if self.obs.is_some() {
+                self.observe_write(word, v, r.is_ok());
+            }
+            r?;
             return Ok(());
         }
         if self.code_pages[(word >> 7) as usize] {
+            if self.obs.is_some() {
+                self.observe_write(word, v, false);
+            }
             return self.code_page_write(word);
         }
         let b = (2 * word) as usize;
         unsafe {
             *self.mem.add(b) = (v >> 8) as u8;
             *self.mem.add(b + 1) = v as u8;
+        }
+        if self.obs.is_some() {
+            self.observe_write(word, v, true);
         }
         Ok(())
     }

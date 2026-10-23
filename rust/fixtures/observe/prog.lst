@@ -1,0 +1,22 @@
+
+	.sect ".text"
+020000: c401             *AR0 = T0
+020002: c401             *AR0 = T0
+020004: c521             *AR1 = T1
+020006: eb4108           dbl(*AR2) = AC0
+020009: c461_3d11        *AR3 = T0 || AC1 = #1
+02000d: 4804             return
+02000f: 4c02             repeat(#2)
+020011: c403                *AR0+ = T0
+020013: 4804             return
+020015: 9664             if (TC1) execute(AD_Unit)
+020017: c401             *AR0 = T0
+020019: c523_9ee5        if (TC2) execute(D_Unit) || *AR1+ = T1
+02001d: 4804             return
+02001f: c401             *AR0 = T0
+020021: 080004           call #0x020028
+020024: c421             *AR1 = T0
+020026: 4804             return
+020028: c541             *AR2 = T1
+02002a: 4804             return
+02002c: 20               nop

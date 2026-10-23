@@ -18,6 +18,7 @@ pub mod guard;
 pub mod icache;
 pub mod mcbsp;
 pub mod mem;
+pub mod observe;
 pub mod parts;
 pub mod policy;
 pub mod run;
